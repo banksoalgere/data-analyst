@@ -15,6 +15,8 @@ An intelligent data analytics platform that allows you to upload CSV files and a
 - **Data Preview**: Shows schema and sample data
 - **Chat Interface**: Natural language query input
 - **Dynamic Charts**: Renders line, bar, scatter, pie, and area charts
+- **Privacy & Terms**: Dedicated pages for legal compliance
+- **Premium Dark UI**: Refined aesthetic with custom scrollbars and glassmorphism
 
 ## Setup
 
@@ -139,6 +141,8 @@ backend/
 frontend/
 ├── app/
 │   ├── dashboard/       # Main dashboard page
+│   ├── privacy/         # Privacy Policy page
+│   ├── terms/           # Terms of Service page
 │   └── api/             # API route proxies
 ├── components/
 │   ├── CSVUploader.tsx      # File upload

@@ -1,70 +1,81 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  
-  --popover: #18181b;
-  --popover-foreground: #fafafa;
-  
-  --primary: #f4f4f5;
-  --primary-foreground: #18181b;
-  
-  --secondary: #27272a;
-  --secondary-foreground: #fafafa;
-  
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
-  
-  --accent: #27272a;
-  --accent-foreground: #fafafa;
-  
+  /* Slate Dark Theme - "Rich Dark" */
+  --background: #0b0f17;
+  /* Deep slate/black, not pure void */
+  --foreground: #f8fafc;
+  /* Slate-50 */
+
+  --card: #111623;
+  /* Slightly lighter slate */
+  --card-foreground: #f8fafc;
+
+  --popover: #111623;
+  --popover-foreground: #f8fafc;
+
+  --primary: #f8fafc;
+  /* High contrast white/slate for text/borders */
+  --primary-foreground: #0f172a;
+  /* Slate-900 */
+
+  --secondary: #1e293b;
+  /* Slate-800 */
+  --secondary-foreground: #f8fafc;
+
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  /* Slate-400 */
+
+  --accent: #1e293b;
+  --accent-foreground: #f8fafc;
+
   --destructive: #7f1d1d;
-  --destructive-foreground: #fafafa;
-  
-  --border: #27272a;
-  --input: #27272a;
-  --ring: #d4d4d8;
-  
-  --radius: 0.5rem;
+  /* Kept for semantics, but UI usage will be minimal/neutral */
+  --destructive-foreground: #f8fafc;
+
+  --border: #1e293b;
+  /* Slate-800 */
+  --input: #1e293b;
+  --ring: #94a3b8;
+
+  --radius: 0rem;
+  /* Sharp edges for "High-End" look */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  
+
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  
+
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  
+
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  
+
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
-  
+
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  
+
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  
+
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  
+
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  
+
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: calc(var(--radius) - 1px);
   --radius-lg: var(--radius);
-  
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

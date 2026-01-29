@@ -4,18 +4,18 @@ import { useState, FormEvent, useRef, useEffect } from "react"
 import { FullMessage } from "@/types/chat"
 
 const EXAMPLE_QUERIES = [
-    "What were our top 5 products by revenue last month?",
-    "Show me the customer churn rate trend",
-    "Which products have the highest cart abandonment?",
-    "Compare conversion rates across marketing channels",
+    "TOP PRODUCTS BY REVENUE",
+    "CUSTOMER CHURN TREND",
+    "CART ABANDONMENT RATES",
+    "CHANNEL CONVERSION COMP",
 ]
 
 export function ChatInterface() {
-    const [ messages, setMessages ] = useState<FullMessage[]>([]);
-    const [ loading, setLoading ] = useState(false);
-    const [ inputValue, setInputValue ] = useState("");
-    const [ error, setError ] = useState<string | null>(null);
-    const [ streamingMessage, setStreamingMessage ] = useState("");
+    const [messages, setMessages] = useState<FullMessage[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [inputValue, setInputValue] = useState("");
+    const [error, setError] = useState<string | null>(null);
+    const [streamingMessage, setStreamingMessage] = useState("");
     const abortControllerRef = useRef<AbortController | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -29,7 +29,7 @@ export function ChatInterface() {
 
     const handleSumbmit = async (e: FormEvent) => {
         e.preventDefault()
-        if (!inputValue.trim() || loading) {return}
+        if (!inputValue.trim() || loading) { return }
 
         const userMessage: FullMessage = {
             id: crypto.randomUUID(),
@@ -135,135 +135,119 @@ export function ChatInterface() {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-black">
+        <div className="flex flex-col h-screen bg-background text-foreground font-mono text-sm">
             {/* Header */}
-            <div className="bg-neutral-900/50 border-b border-neutral-800 px-6 py-4 backdrop-blur-sm">
-                <h1 className="text-2xl font-bold text-white">
-                    E-commerce Analytics AI
-                </h1>
-                <p className="text-sm text-neutral-400 mt-1">
-                    Ask questions about your store performance, products, and customers
-                </p>
-            </div>
-
-            {/* Conversation History */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-                <div className="max-w-4xl mx-auto space-y-4">
-                    {messages.length === 0 && !streamingMessage && (
-                        <div className="text-center py-12">
-                            <div className="inline-flex items-center justify-center w-16 h-16 bg-neutral-800 rounded-full mb-4">
-                                <svg className="w-8 h-8 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                </svg>
-                            </div>
-                            <h2 className="text-xl font-semibold text-white mb-2">
-                                Welcome to Your Analytics Assistant
-                            </h2>
-                            <p className="text-neutral-400 mb-6">
-                                Get instant insights about your e-commerce data
-                            </p>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
-                                {EXAMPLE_QUERIES.map((query, idx) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => handleExampleClick(query)}
-                                        className="text-left p-3 bg-neutral-900 border border-neutral-800 rounded-lg hover:border-neutral-700 hover:bg-neutral-800 transition-colors text-sm text-neutral-300 hover:text-white"
-                                    >
-                                        {query}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {messages.map((msg) => (
-                        <div
-                            key={msg.id}
-                            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                        >
-                            <div
-                                className={`max-w-3xl rounded-lg p-4 ${
-                                    msg.role === 'user'
-                                        ? 'bg-neutral-800 text-white'
-                                        : 'bg-neutral-900 border border-neutral-800 text-neutral-100'
-                                }`}
-                            >
-                                <div className="flex items-start gap-3">
-                                    {msg.role === 'assistant' && (
-                                        <div className="flex-shrink-0 w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center">
-                                            <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                            </svg>
-                                        </div>
-                                    )}
-                                    <div className="flex-1 whitespace-pre-wrap">
-                                        {msg.message}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-
-                    {streamingMessage && (
-                        <div className="flex justify-start">
-                            <div className="max-w-3xl rounded-lg p-4 bg-neutral-900 border border-neutral-800 text-neutral-100">
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center">
-                                        <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                        </svg>
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="whitespace-pre-wrap">
-                                            {streamingMessage}
-                                            <span className="inline-block w-1 h-4 bg-neutral-400 ml-1 animate-pulse"></span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
+            <div className="border-b border-border px-6 py-4 flex justify-between items-center bg-card/50 backdrop-blur-md">
+                <div>
+                    <h1 className="text-sm font-bold tracking-widest uppercase">
+                        ANALYTICS_TERMINAL_V1
+                    </h1>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">System Online</span>
                 </div>
             </div>
 
-            {/* Fixed Input at Bottom */}
-            <div className="bg-neutral-900/50 border-t border-neutral-800 px-6 py-4 backdrop-blur-sm">
-                <div className="max-w-4xl mx-auto">
+            {/* Conversation History */}
+            <div className="flex-1 overflow-y-auto p-0">
+                <div className="max-w-3xl mx-auto space-y-0 h-full flex flex-col justify-end min-h-0">
+                    <div className="pb-8 pt-8 px-6 space-y-8">
+                        {messages.length === 0 && !streamingMessage && (
+                            <div className="h-full flex flex-col items-center justify-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
+                                <div className="border border-border p-8 max-w-lg w-full">
+                                    <div className="mb-8 font-bold tracking-tighter text-2xl">
+                                        INITIALIZE ANALYSIS...
+                                    </div>
+                                    <div className="space-y-2">
+                                        {EXAMPLE_QUERIES.map((query, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => handleExampleClick(query)}
+                                                className="w-full text-left px-4 py-3 border border-transparent hover:border-primary hover:bg-muted/30 transition-all duration-200 text-xs tracking-wider text-muted-foreground hover:text-foreground flex justify-between items-center group"
+                                            >
+                                                <span>{query}</span>
+                                                <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {messages.map((msg) => (
+                            <div
+                                key={msg.id}
+                                className={`flex flex-col border-l-2 ${msg.role === 'user'
+                                        ? 'border-primary pl-6 items-end'
+                                        : 'border-muted pl-6 items-start'
+                                    }`}
+                            >
+                                <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+                                    {msg.role === 'user' ? '[ USER_INPUT ]' : '[ SYSTEM_RESPONSE ]'}
+                                </div>
+                                <div className="whitespace-pre-wrap leading-relaxed max-w-2xl">
+                                    {msg.message}
+                                </div>
+                            </div>
+                        ))}
+
+                        {streamingMessage && (
+                            <div className="flex flex-col border-l-2 border-muted pl-6 items-start">
+                                <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground animate-pulse">
+                                    [ PROCESSING... ]
+                                </div>
+                                <div className="whitespace-pre-wrap leading-relaxed max-w-2xl">
+                                    {streamingMessage}
+                                    <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse align-middle"></span>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </div>
+                </div>
+            </div>
+
+            {/* Input Area */}
+            <div className="border-t border-border bg-background p-6">
+                <div className="max-w-3xl mx-auto">
                     {error && (
-                        <div className="mb-3 bg-red-950/50 border border-red-900 text-red-400 px-4 py-2 rounded-lg text-sm">
-                            {error}
+                        <div className="mb-4 border border-destructive/50 text-destructive text-xs p-3">
+                            ERROR: {error}
                         </div>
                     )}
-                    <form onSubmit={handleSumbmit} className="flex gap-3">
-                        <input
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            className="flex-1 bg-neutral-950 border border-neutral-800 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-1 focus:ring-neutral-700 focus:border-neutral-700 placeholder:text-neutral-500"
-                            placeholder="Ask about sales, products, customers, conversion rates..."
-                            disabled={loading}
-                        />
+                    <form onSubmit={handleSumbmit} className="flex gap-4 items-end">
+                        <div className="flex-1 relative">
+                            <div className="absolute left-4 top-4 text-muted-foreground pointer-events-none select-none">
+                                {'>'}
+                            </div>
+                            <input
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                className="w-full bg-card/50 border border-border text-foreground pl-10 pr-4 py-4 focus:outline-none focus:border-primary transition-colors placeholder:text-muted-foreground/30 font-mono text-sm"
+                                placeholder="ENTER COMMAND..."
+                                disabled={loading}
+                                autoFocus
+                            />
+                        </div>
                         {loading ? (
                             <button
                                 type="button"
                                 onClick={handleCancel}
-                                className="px-6 py-3 bg-red-950 text-red-400 border border-red-900 rounded-lg hover:bg-red-900 transition-colors font-medium"
+                                className="h-[54px] px-8 border border-border hover:bg-muted/50 hover:text-foreground hover:border-foreground transition-all duration-200 uppercase tracking-widest text-xs font-bold"
                             >
-                                Stop
+                                [ STOP ]
                             </button>
                         ) : (
                             <button
                                 type="submit"
-                                className="px-6 py-3 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed border border-neutral-700"
+                                className="h-[54px] px-8 bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-200 uppercase tracking-widest text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={loading || !inputValue.trim()}
                             >
-                                Send
+                                [ RUN ]
                             </button>
                         )}
                     </form>
-                    <p className="text-xs text-neutral-600 mt-2 text-center">
-                        Ask questions about your e-commerce metrics, products, and customer behavior
-                    </p>
                 </div>
             </div>
         </div>
