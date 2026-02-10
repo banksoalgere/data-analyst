@@ -3,6 +3,14 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { FullMessage } from "@/types/chat"
 import { AssistantMessageContent } from "@/components/data-chat/AssistantMessageContent"
+import {
+  AnalyzeProgressEvent,
+  buildAssistantMessageFromAnalyzePayload,
+  formatProgressMessage,
+  parseAnalyzeStreamEvent,
+  parseSseDataLine,
+  splitSseFrames,
+} from "@/lib/analyze-stream"
 
 interface DatasetProfile {
   recommended_questions?: string[]
@@ -11,6 +19,7 @@ interface DatasetProfile {
 interface DataChatInterfaceProps {
   sessionId: string | null
   profile?: DatasetProfile | null
+  showStarterPrompts?: boolean
 }
 
 const DEFAULT_STARTERS = [
@@ -19,7 +28,11 @@ const DEFAULT_STARTERS = [
   "Find meaningful correlations between key metrics.",
 ]
 
-export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps) {
+export function DataChatInterface({
+  sessionId,
+  profile,
+  showStarterPrompts = true,
+}: DataChatInterfaceProps) {
   const [messages, setMessages] = useState<FullMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [inputValue, setInputValue] = useState("")
@@ -66,30 +79,6 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
     setDraftingByMessage({})
     setApprovingByAction({})
   }, [sessionId])
-
-  const formatProgressMessage = (event: Record<string, unknown>): string => {
-    const phase = typeof event.phase === "string" ? event.phase : ""
-    if (phase === "plan_ready") {
-      const probeCount = typeof event.probe_count === "number" ? event.probe_count : "?"
-      const goal = typeof event.analysis_goal === "string" ? event.analysis_goal : "analysis"
-      return `Planned ${probeCount} probes for ${goal}`
-    }
-    if (phase === "probe_started") {
-      const probeId = typeof event.probe_id === "string" ? event.probe_id : "probe"
-      const question = typeof event.question === "string" ? event.question : "running probe"
-      return `Running ${probeId}: ${question}`
-    }
-    if (phase === "probe_completed") {
-      const probeId = typeof event.probe_id === "string" ? event.probe_id : "probe"
-      const rowCount = typeof event.row_count === "number" ? event.row_count : "?"
-      return `Completed ${probeId} (${rowCount} rows)`
-    }
-    if (phase === "synthesis_completed") {
-      const primaryProbe = typeof event.primary_probe_id === "string" ? event.primary_probe_id : "primary probe"
-      return `Synthesized final answer using ${primaryProbe}`
-    }
-    return "Analyzing data..."
-  }
 
   const submitQuestion = async (question: string) => {
     if (!question.trim() || loading || !sessionId) return
@@ -139,28 +128,19 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
-        const chunks = buffer.split("\n\n")
-        buffer = chunks.pop() ?? ""
+        const parsedFrames = splitSseFrames(buffer)
+        buffer = parsedFrames.remainder
 
-        for (const chunk of chunks) {
-          const line = chunk
-            .split("\n")
-            .find((entry) => entry.startsWith("data: "))
-          if (!line) continue
-
-          const raw = line.slice(6).trim()
+        for (const frame of parsedFrames.frames) {
+          const raw = parseSseDataLine(frame)
           if (!raw) continue
 
-          let event: Record<string, unknown>
-          try {
-            event = JSON.parse(raw) as Record<string, unknown>
-          } catch {
-            continue
-          }
+          const event = parseAnalyzeStreamEvent(raw)
+          if (!event) continue
 
-          const eventType = typeof event.type === "string" ? event.type : ""
+          const eventType = event.type
           if (eventType === "progress") {
-            const progressLine = formatProgressMessage(event)
+            const progressLine = formatProgressMessage(event as AnalyzeProgressEvent)
             setStreamProgress((prev) => {
               const next = [...prev, progressLine]
               return next.slice(-8)
@@ -169,9 +149,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
           }
 
           if (eventType === "error") {
-            const detail = typeof event.detail === "string" && event.detail
-              ? event.detail
-              : "Analysis failed"
+            const detail = typeof event.detail === "string" && event.detail ? event.detail : "Analysis failed"
             throw new Error(detail)
           }
 
@@ -179,25 +157,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
             const payload = event.payload as Record<string, unknown> | undefined
             if (!payload) continue
 
-            const assistantMessage: FullMessage = {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              message: String(payload.insight ?? ""),
-              chartData: Array.isArray(payload.data)
-                ? (payload.data as Record<string, unknown>[])
-                : [],
-              chartConfig: (payload.chart_config ?? undefined) as FullMessage["chartConfig"],
-              chartOptions: Array.isArray(payload.chart_options)
-                ? (payload.chart_options as FullMessage["chartOptions"])
-                : [],
-              trust: (payload.trust ?? undefined) as FullMessage["trust"],
-              sql: typeof payload.sql === "string" ? payload.sql : undefined,
-              analysisType: typeof payload.analysis_type === "string" ? payload.analysis_type : undefined,
-              followUpQuestions: Array.isArray(payload.follow_up_questions)
-                ? (payload.follow_up_questions.filter((item): item is string => typeof item === "string").slice(0, 3))
-                : [],
-              exploration: (payload.exploration ?? undefined) as FullMessage["exploration"],
-            }
+            const assistantMessage = buildAssistantMessageFromAnalyzePayload(payload)
 
             const incomingConversationId = typeof event.conversation_id === "string" ? event.conversation_id : null
             if (incomingConversationId) {
@@ -323,18 +283,20 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
               </div>
               <h2 className="text-xl font-semibold text-white mb-2">Ready to Analyze</h2>
               <p className="text-neutral-400">Ask questions about your data in plain English</p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {starters.map((starter) => (
-                  <button
-                    key={starter}
-                    type="button"
-                    className="text-xs border border-neutral-700 text-neutral-300 px-3 py-1.5 rounded hover:border-neutral-500 hover:text-white transition-colors"
-                    onClick={() => setInputValue(starter)}
-                  >
-                    {starter}
-                  </button>
-                ))}
-              </div>
+              {showStarterPrompts && (
+                <div className="mt-6 flex flex-wrap justify-center gap-2">
+                  {starters.map((starter) => (
+                    <button
+                      key={starter}
+                      type="button"
+                      className="text-xs border border-neutral-700 text-neutral-300 px-3 py-1.5 rounded hover:border-neutral-500 hover:text-white transition-colors"
+                      onClick={() => setInputValue(starter)}
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

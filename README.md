@@ -1,166 +1,154 @@
-# Spreadsheet Data Analytics with AI
+# Data Analyst
 
-An intelligent data analytics platform that allows you to upload CSV/Excel files and ask questions in natural language. The AI automatically generates SQL queries, executes them, and creates visualizations.
+Chat-driven analytics for CSV/Excel datasets using FastAPI, DuckDB, Next.js, and OpenAI.
+
+Upload a dataset, ask complex questions in plain English, and get:
+- multi-probe SQL exploration
+- trust-scored insights
+- interactive charts
+- optional action drafts (SQL view, dbt model, Jira ticket, Slack summary)
+
+## What Is Implemented
+
+- Streaming analysis pipeline (`/analyze/stream`) with progress events
+- Multi-step exploration with up to 5 probes per question
+- Probe artifact persistence in session DuckDB tables
+- Compact randomized probe samples fed back into synthesis (context-safe)
+- Primary-probe quality guard to avoid weak single-row summaries dominating results
+- Safe SQL execution (read-only SELECT/CTE only)
 
 ## Architecture
 
-### Backend (FastAPI + DuckDB + OpenAI)
-- **Spreadsheet Upload**: Supports CSV and Excel formats in DuckDB sessions
-- **AI SQL Generation**: Uses OpenAI to convert natural language to SQL
-- **Strict LLM Contract**: Fails fast if the model response is invalid or unavailable (no heuristic fallback)
-- **Safe Execution**: Validates read-only SQL and enforces row limits
-- **Chart Config**: AI determines the best visualization type
-- **Dataset Profiling**: Detects numeric/time/categorical fields and top correlations at upload time
+### Backend (`/backend`)
 
-### Frontend (Next.js + React + Recharts)
-- **File Upload**: Drag-and-drop CSV/Excel interface
-- **Data Preview**: Shows schema and sample data
-- **Chat Interface**: Natural language query input
-- **Dynamic Charts**: Renders line, bar, scatter, pie, and area charts
-- **Privacy & Terms**: Dedicated pages for legal compliance
-- **Premium Dark UI**: Refined aesthetic with custom scrollbars and glassmorphism
+- `main.py`
+  - FastAPI routes
+  - chat + analysis streaming
+  - in-memory conversation/session state
+- `services/data_service.py`
+  - upload + schema/profile generation
+  - SQL validation/execution
+  - probe artifact persistence/retrieval
+- `services/ai_service.py`
+  - LLM prompting + strict JSON normalization
+  - exploration planning + synthesis
+- `services/analysis_runtime.py`
+  - orchestration for probe execution, chart prep, trust layer, synthesis
+- `services/runtime/*`
+  - charting, trust scoring, causal lab, action runtime
 
-## Setup
+### Frontend (`/frontend`)
 
-### Backend Setup
+- `app/dashboard/page.tsx`
+  - upload + preview + analysis UI
+- `components/DataChatInterface.tsx`
+  - streaming analyze UX, follow-ups, action workflows
+- `components/data-chat/*`
+  - assistant message rendering, trust/exploration/action panels
+- `lib/analyze-stream.ts`
+  - SSE frame parsing + progress formatting helpers
+- `app/api/*`
+  - Next.js proxy routes to backend
 
-1. Navigate to backend directory:
+## Quick Start
+
+### 1) Backend
+
 ```bash
 cd backend
-```
-
-2. Install dependencies with uv:
-```bash
 uv sync
-```
-
-3. Create `.env` file:
-```bash
 echo "OPENAI_API_KEY=your_key_here" > .env
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-4. Run the server:
+Health check:
 ```bash
-uv run uvicorn main:app --reload --port 8000
+curl http://127.0.0.1:8000/health
 ```
 
-The backend will be available at `http://localhost:8000`
+### 2) Frontend
 
-### Frontend Setup
-
-1. Navigate to frontend directory:
 ```bash
 cd frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
+npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-3. Run the development server:
-```bash
-npm run dev
-```
+Open:
+- [http://127.0.0.1:3000/dashboard](http://127.0.0.1:3000/dashboard)
 
-The frontend will be available at `http://localhost:3000`
+## API Overview
 
-## Usage
+### Core Analysis Routes (Backend)
 
-1. **Upload File**: Go to `/dashboard` and drag-drop a CSV or Excel file
-2. **View Preview**: See the data schema and first 5 rows
-3. **Ask Questions**: Type natural language questions like:
-   - "Show me revenue trends over time"
-   - "What are the top 5 products by sales?"
-   - "Compare conversion rates by region"
-   - "Find the strongest correlations in this dataset"
-4. **View Results**: Get AI-generated insights with interactive charts
+- `POST /upload`
+  - upload CSV/Excel; returns `session_id`, schema, preview, profile
+- `POST /analyze`
+  - non-streaming analysis response
+- `POST /analyze/stream`
+  - SSE stream with progress + final result
+- `POST /analysis/sprint`
+  - run multiple questions in sequence
+- `POST /hypotheses`
+  - generate candidate exploration questions
+- `POST /causal-lab`
+  - heuristic causal-driver style exploration
 
-## API Endpoints
+### SSE Event Contract (`/analyze/stream`)
 
-### Backend Endpoints
+`type: "progress"` events:
+- `phase: "plan_ready"` + `probe_count` + `analysis_goal`
+- `phase: "probe_started"` + `probe_id` + `question`
+- `phase: "probe_completed"` + `probe_id` + `row_count`
+- `phase: "synthesis_completed"` + `primary_probe_id`
 
-- `POST /upload` - Upload CSV/Excel file
-  - Returns: session_id, schema, preview, row_count, profile
+`type: "result"` event:
+- `conversation_id`
+- `payload` (same shape as `/analyze` result)
 
-- `POST /analyze` - Analyze data with natural language
-  - Body: `{session_id, question, conversation_id?}`
-  - Returns: `{insight, chart_config, data, sql, analysis_type, follow_up_questions, conversation_id}`
+`type: "error"` event:
+- `detail`
+- `status`
 
-- `GET /session/{session_id}` - Get session info
-- `GET /session/{session_id}/profile` - Get dataset profile info
-- `DELETE /session/{session_id}` - Delete session
-- `GET /health` - Health check
-
-### Frontend API Routes
-
-- `POST /api/upload` - Proxy to backend upload
-- `POST /api/analyze` - Proxy to backend analyze
-
-## Security Features
-
-- **SQL Injection Protection**: Only SELECT queries allowed
-- **Query Validation**: Rejects comments, multi-statement SQL, dangerous keywords, and IO functions
-- **Row Limits**: Maximum 1000 rows per query
-- **Session TTL**: Auto-cleanup after 1 hour
-- **Session Cap**: LRU cleanup prevents unbounded in-memory growth
-- **File Type Validation**: Accepts `.csv`, `.xls`, `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlsb`
-- **File Size Validation**: Uploads are capped at 25MB
-
-## Tech Stack
+## Configuration
 
 ### Backend
-- FastAPI - Web framework
-- DuckDB - In-memory analytical database
-- OpenAI - AI/LLM for SQL generation
-- Pandas - Data manipulation
-- Python 3.11+
+
+- `OPENAI_API_KEY` (required)
 
 ### Frontend
-- Next.js 16 - React framework
-- TypeScript - Type safety
-- Recharts - Data visualization
-- React Dropzone - File uploads
-- Tailwind CSS - Styling
 
-## Example Questions
+- `BACKEND_URL` (optional, defaults to `http://localhost:8000`)
 
-Try asking:
-- "What's the average value by category?"
-- "Show me trends over the last 6 months"
-- "Which items have the highest correlation?"
-- "Compare metrics across different segments"
-- "What are the outliers in this dataset?"
+## Development Commands
 
-## Development
+### Backend
 
-### Project Structure
-
-```
-backend/
-├── main.py              # FastAPI app & endpoints
-├── services/
-│   ├── data_service.py  # DuckDB operations
-│   └── ai_service.py    # OpenAI integration
-└── pyproject.toml       # Dependencies
-
-frontend/
-├── app/
-│   ├── dashboard/       # Main dashboard page
-│   ├── privacy/         # Privacy Policy page
-│   ├── terms/           # Terms of Service page
-│   └── api/             # API route proxies
-├── components/
-│   ├── CSVUploader.tsx      # File upload
-│   ├── DataPreview.tsx      # Schema/data preview
-│   ├── DynamicChart.tsx     # Chart renderer
-│   └── DataChatInterface.tsx # Chat interface
-└── package.json
+```bash
+cd backend
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-## Contributing
+### Frontend
 
-Feel free to submit issues or pull requests!
+```bash
+cd frontend
+npm run lint
+```
+
+## Notes on Model Usage
+
+- The backend uses `chat.completions` with `gpt-5`.
+- `temperature` is intentionally omitted for compatibility with newer model constraints.
+
+## Cleanup Performed
+
+- Removed unused legacy scaffold:
+  - old `backend/api/*` package
+  - unused debug script `backend/test_responses.py`
+  - unused frontend component `frontend/components/ChatInterface.tsx`
+- Refactored backend analysis conversation handling into shared helper functions.
+- Extracted frontend stream parsing/formatting into `frontend/lib/analyze-stream.ts`.
 
 ## License
 

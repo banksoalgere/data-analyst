@@ -1,24 +1,31 @@
-## Backend
+# Backend
 
-FastAPI service for CSV/Excel upload, profiling, and AI-driven analytics.
+FastAPI service for:
+- file upload + profiling
+- SQL-safe query execution on DuckDB sessions
+- multi-probe AI analysis and synthesis
+- streaming analysis events over SSE
 
-### Key behavior
-
-- Uploads CSV/Excel files into DuckDB in-memory sessions.
-- Builds dataset profile metadata (column types, candidate correlations, starter questions).
-- Runs strict read-only SQL validation before query execution.
-- Uses OpenAI for SQL + insight generation.
-- Returns explicit errors if LLM output is invalid (no heuristic fallback).
-
-### Run
+## Run
 
 ```bash
 uv sync
-uv run uvicorn main:app --reload --port 8000
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### Test
+## Test
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+.venv/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
+
+## Key Routes
+
+- `POST /upload`
+- `POST /analyze`
+- `POST /analyze/stream`
+- `POST /analysis/sprint`
+- `POST /hypotheses`
+- `POST /causal-lab`
+
+See the project root `README.md` for full API details and streaming event contracts.

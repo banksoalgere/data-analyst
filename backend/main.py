@@ -56,6 +56,60 @@ def get_analytics_conversation_key(session_id: str, conversation_id: str) -> str
     return f"{session_id}:{conversation_id}"
 
 
+def _prepare_analytics_request(
+    session_id: str,
+    requested_conversation_id: str | None,
+) -> tuple[dict[str, Any], str, list[dict[str, str]]]:
+    session_info = data_service.get_session_info(session_id)
+    conversation_id = requested_conversation_id or str(uuid.uuid4())
+    conv_key = get_analytics_conversation_key(session_id, conversation_id)
+    history = analytics_conversations.get(conv_key, [])
+    return session_info, conversation_id, history
+
+
+def _build_exploration_recap(exploration: Any) -> str:
+    if not isinstance(exploration, dict):
+        return ""
+
+    probes = exploration.get("probes")
+    primary_probe_id = exploration.get("primary_probe_id")
+    if not isinstance(probes, list) or not probes:
+        return ""
+
+    recap_lines: list[str] = []
+    for probe in probes[:5]:
+        if not isinstance(probe, dict):
+            continue
+        probe_id = str(probe.get("probe_id", "")).strip() or "probe"
+        prefix = "*" if probe_id == primary_probe_id else "-"
+        recap_lines.append(
+            f"{prefix} {probe_id}: {str(probe.get('question', '')).strip()} "
+            f"(rows={probe.get('row_count', 'n/a')})"
+        )
+    return "\n".join(recap_lines)
+
+
+def _build_assistant_context(analysis_result: dict[str, Any]) -> str:
+    insight = str(analysis_result.get("insight", "")).strip()
+    recap = _build_exploration_recap(analysis_result.get("exploration"))
+    if not recap:
+        return insight
+    return f"{insight}\n\nExploration recap:\n{recap}"
+
+
+def _store_analytics_turn(
+    session_id: str,
+    conversation_id: str,
+    question: str,
+    analysis_result: dict[str, Any],
+    history: list[dict[str, str]],
+) -> None:
+    conv_key = get_analytics_conversation_key(session_id, conversation_id)
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": _build_assistant_context(analysis_result)})
+    analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
+
+
 @app.get("/")
 async def root():
     return {"message": "Chat with Database AI Analyst API"}
@@ -115,10 +169,10 @@ async def analyze_data(request: AnalyzeRequest):
     try:
         logger.info("Analyzing question for session %s: %s...", request.session_id, request.question[:100])
 
-        session_info = data_service.get_session_info(request.session_id)
-        conversation_id = request.conversation_id or str(uuid.uuid4())
-        conv_key = get_analytics_conversation_key(request.session_id, conversation_id)
-        history = analytics_conversations.get(conv_key, [])
+        session_info, conversation_id, history = _prepare_analytics_request(
+            session_id=request.session_id,
+            requested_conversation_id=request.conversation_id,
+        )
 
         analysis_result = runtime.run_analysis(
             session_id=request.session_id,
@@ -128,30 +182,13 @@ async def analyze_data(request: AnalyzeRequest):
             sprint_mode=False,
         )
 
-        assistant_context = analysis_result["insight"]
-        exploration = analysis_result.get("exploration")
-        if isinstance(exploration, dict):
-            probes = exploration.get("probes")
-            primary_probe_id = exploration.get("primary_probe_id")
-            if isinstance(probes, list) and probes:
-                recap_lines: list[str] = []
-                for probe in probes[:5]:
-                    if not isinstance(probe, dict):
-                        continue
-                    probe_id = str(probe.get("probe_id", "")).strip() or "probe"
-                    prefix = "*" if probe_id == primary_probe_id else "-"
-                    recap_lines.append(
-                        f"{prefix} {probe_id}: {str(probe.get('question', '')).strip()} "
-                        f"(rows={probe.get('row_count', 'n/a')})"
-                    )
-                if recap_lines:
-                    assistant_context = (
-                        f"{assistant_context}\n\nExploration recap:\n" + "\n".join(recap_lines)
-                    )
-
-        history.append({"role": "user", "content": request.question})
-        history.append({"role": "assistant", "content": assistant_context})
-        analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
+        _store_analytics_turn(
+            session_id=request.session_id,
+            conversation_id=conversation_id,
+            question=request.question,
+            analysis_result=analysis_result,
+            history=history,
+        )
 
         return {**analysis_result, "conversation_id": conversation_id}
 
@@ -171,10 +208,10 @@ async def analyze_data_stream(request: AnalyzeRequest):
         try:
             logger.info("Streaming analysis for session %s: %s...", request.session_id, request.question[:100])
 
-            session_info = data_service.get_session_info(request.session_id)
-            conversation_id = request.conversation_id or str(uuid.uuid4())
-            conv_key = get_analytics_conversation_key(request.session_id, conversation_id)
-            history = analytics_conversations.get(conv_key, [])
+            session_info, conversation_id, history = _prepare_analytics_request(
+                session_id=request.session_id,
+                requested_conversation_id=request.conversation_id,
+            )
 
             def on_progress(event: dict[str, Any]):
                 payload = {"type": "progress", **event}
@@ -190,30 +227,13 @@ async def analyze_data_stream(request: AnalyzeRequest):
                 on_progress,
             )
 
-            assistant_context = analysis_result["insight"]
-            exploration = analysis_result.get("exploration")
-            if isinstance(exploration, dict):
-                probes = exploration.get("probes")
-                primary_probe_id = exploration.get("primary_probe_id")
-                if isinstance(probes, list) and probes:
-                    recap_lines: list[str] = []
-                    for probe in probes[:5]:
-                        if not isinstance(probe, dict):
-                            continue
-                        probe_id = str(probe.get("probe_id", "")).strip() or "probe"
-                        prefix = "*" if probe_id == primary_probe_id else "-"
-                        recap_lines.append(
-                            f"{prefix} {probe_id}: {str(probe.get('question', '')).strip()} "
-                            f"(rows={probe.get('row_count', 'n/a')})"
-                        )
-                    if recap_lines:
-                        assistant_context = (
-                            f"{assistant_context}\n\nExploration recap:\n" + "\n".join(recap_lines)
-                        )
-
-            history.append({"role": "user", "content": request.question})
-            history.append({"role": "assistant", "content": assistant_context})
-            analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
+            _store_analytics_turn(
+                session_id=request.session_id,
+                conversation_id=conversation_id,
+                question=request.question,
+                analysis_result=analysis_result,
+                history=history,
+            )
 
             loop.call_soon_threadsafe(
                 queue.put_nowait,
