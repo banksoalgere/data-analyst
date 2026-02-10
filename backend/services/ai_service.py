@@ -90,6 +90,33 @@ class AIAnalystService:
             "follow_up_questions": follow_ups,
         }
 
+    def _call_json_model(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=temperature,
+            )
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("LLM returned empty JSON content.")
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse model JSON output: {e}")
+            raise ValueError("LLM returned invalid JSON output.") from e
+        except Exception as e:
+            logger.error(f"Model JSON call failed: {e}")
+            raise ValueError(f"LLM request failed: {str(e)}") from e
+
     def analyze_question(
         self,
         question: str,
@@ -173,18 +200,11 @@ Return JSON in this exact format:
         try:
             logger.info(f"Generating SQL for question: {question[:100]}...")
 
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3
+            result = self._call_json_model(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
             )
-
-            content = response.choices[0].message.content
-            result = json.loads(content)
 
             normalized = self._normalize_response(result)
             logger.info(f"Generated SQL: {normalized['sql'][:100]}...")
@@ -244,3 +264,170 @@ Provide a 1-2 sentence insight highlighting key findings or trends."""
         except Exception as e:
             logger.error(f"Error generating insight: {e}")
             raise ValueError(f"LLM insight generation failed: {str(e)}")
+
+    def generate_hypotheses(
+        self,
+        schema: List[Dict[str, Any]],
+        profile: Dict[str, Any] | None = None,
+        table_name: str = "uploaded_data",
+        count: int = 20,
+    ) -> Dict[str, Any]:
+        if count < 5:
+            raise ValueError("Hypothesis count must be at least 5.")
+
+        schema_str = self._format_schema_for_prompt(schema)
+        profile_json = json.dumps(profile or {}, indent=2, default=str)
+
+        system_prompt = f"""You are a principal analytics strategist.
+Generate exactly {count} high-value, concrete analysis questions for exploratory data analysis.
+
+Table name: {table_name}
+Schema:
+{schema_str}
+
+Dataset profile:
+{profile_json}
+
+Coverage requirements:
+- Include trend-break questions
+- Include segment delta questions
+- Include correlation/relationship questions
+- Include outlier/anomaly questions
+- Include operational/business actionability
+
+Rules:
+- Questions must be specific and answerable with SQL on this dataset
+- No duplicates or near-duplicates
+- Keep each question under 20 words
+- Return valid JSON only
+"""
+
+        user_prompt = f"""Return JSON in this exact shape:
+{{
+  "hypotheses": ["q1", "q2", "... exactly {count} total ..."],
+  "rationale_summary": "1-2 sentence summary"
+}}"""
+
+        result = self._call_json_model(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.35,
+        )
+
+        hypotheses = result.get("hypotheses")
+        if not isinstance(hypotheses, list):
+            raise ValueError("LLM hypothesis output missing hypotheses list.")
+
+        cleaned = []
+        seen = set()
+        for item in hypotheses:
+            if not isinstance(item, str):
+                continue
+            candidate = item.strip()
+            if not candidate:
+                continue
+            key = candidate.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(candidate)
+
+        if len(cleaned) != count:
+            raise ValueError(f"LLM must return exactly {count} unique hypotheses.")
+
+        rationale = result.get("rationale_summary")
+        if not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError("LLM hypothesis output missing rationale_summary.")
+
+        return {
+            "hypotheses": cleaned,
+            "rationale_summary": rationale.strip(),
+        }
+
+    def draft_actions(
+        self,
+        question: str,
+        insight: str,
+        sql: str,
+        analysis_type: str,
+        trust: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        trust_json = json.dumps(trust, indent=2, default=str)
+        system_prompt = """You are an analytics operations agent.
+Given an analysis result, draft concrete next actions.
+Return exactly 4 actions with these required types:
+- sql_view
+- dbt_model
+- jira_ticket
+- slack_summary
+
+Rules:
+- Be specific and actionable.
+- Use realistic payload fields for each type.
+- Return valid JSON only.
+"""
+        user_prompt = f"""Analysis context:
+Question: {question}
+Insight: {insight}
+Analysis type: {analysis_type}
+SQL used:
+{sql}
+Trust layer:
+{trust_json}
+
+Return JSON in this exact shape:
+{{
+  "actions": [
+    {{
+      "type": "sql_view|dbt_model|jira_ticket|slack_summary",
+      "title": "Short title",
+      "description": "What and why",
+      "payload": {{}}
+    }}
+  ]
+}}
+"""
+
+        result = self._call_json_model(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.25,
+        )
+
+        actions = result.get("actions")
+        if not isinstance(actions, list):
+            raise ValueError("LLM action output missing actions list.")
+
+        allowed_types = {"sql_view", "dbt_model", "jira_ticket", "slack_summary"}
+        normalized: List[Dict[str, Any]] = []
+        seen_types: set[str] = set()
+
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_type = action.get("type")
+            title = action.get("title")
+            description = action.get("description")
+            payload = action.get("payload")
+            if action_type not in allowed_types:
+                continue
+            if not isinstance(title, str) or not title.strip():
+                continue
+            if not isinstance(description, str) or not description.strip():
+                continue
+            if not isinstance(payload, dict):
+                continue
+            seen_types.add(action_type)
+            normalized.append(
+                {
+                    "type": action_type,
+                    "title": title.strip(),
+                    "description": description.strip(),
+                    "payload": payload,
+                }
+            )
+
+        if seen_types != allowed_types:
+            raise ValueError("LLM actions must include sql_view, dbt_model, jira_ticket, and slack_summary.")
+
+        return normalized
