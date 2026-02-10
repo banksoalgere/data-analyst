@@ -100,10 +100,21 @@ export function formatProgressMessage(event: AnalyzeProgressEvent): string {
 }
 
 export function buildAssistantMessageFromAnalyzePayload(payload: Record<string, unknown>): FullMessage {
+  const rowCount =
+    typeof payload.row_count === "number" && Number.isFinite(payload.row_count)
+      ? payload.row_count
+      : undefined;
+  const visualizedRowCount =
+    typeof payload.visualized_row_count === "number" && Number.isFinite(payload.visualized_row_count)
+      ? payload.visualized_row_count
+      : undefined;
+
   return {
     id: crypto.randomUUID(),
     role: "assistant",
     message: String(payload.insight ?? ""),
+    rowCount,
+    visualizedRowCount,
     chartData: Array.isArray(payload.data) ? (payload.data as Record<string, unknown>[]) : [],
     chartConfig: (payload.chart_config ?? undefined) as FullMessage["chartConfig"],
     chartOptions: Array.isArray(payload.chart_options)

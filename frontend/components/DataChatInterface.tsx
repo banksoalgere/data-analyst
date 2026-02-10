@@ -46,7 +46,6 @@ export function DataChatInterface({
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
   const [followUps, setFollowUps] = useState<string[]>([])
-  const [viewMenuValue, setViewMenuValue] = useState("")
   const [followUpMenuValue, setFollowUpMenuValue] = useState("")
   const [selectedChartByMessage, setSelectedChartByMessage] = useState<Record<string, number>>({})
   const [selectedProbeByMessage, setSelectedProbeByMessage] = useState<Record<string, string>>({})
@@ -83,7 +82,6 @@ export function DataChatInterface({
     setInputValue("")
     setStreamProgress([])
     setFollowUps([])
-    setViewMenuValue("")
     setFollowUpMenuValue("")
     setSelectedChartByMessage({})
     setSelectedProbeByMessage({})
@@ -388,22 +386,19 @@ export function DataChatInterface({
       <div className="border-t border-neutral-800 p-4">
         <div className="w-full">
           <div className="mb-3 flex justify-end">
-            <label htmlFor="chat-view-menu" className="sr-only">View menu</label>
-            <select
-              id="chat-view-menu"
-              value={viewMenuValue}
-              onChange={(event) => {
-                const value = event.target.value
-                if (value === "toggle-sql") {
-                  setShowSql((current) => !current)
-                }
-                setViewMenuValue("")
-              }}
-              className="bg-neutral-950 border border-neutral-700 text-xs text-neutral-300 px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-neutral-600"
+            <label
+              htmlFor="chat-show-sql"
+              className="inline-flex items-center gap-2 text-xs text-neutral-300"
             >
-              <option value="">View Menu</option>
-              <option value="toggle-sql">{showSql ? "Hide SQL" : "Show SQL"}</option>
-            </select>
+              <input
+                id="chat-show-sql"
+                type="checkbox"
+                checked={showSql}
+                onChange={(event) => setShowSql(event.target.checked)}
+                className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 text-neutral-300 focus:ring-1 focus:ring-neutral-600"
+              />
+              Show SQL
+            </label>
           </div>
 
           {error && (

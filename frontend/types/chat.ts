@@ -65,6 +65,8 @@ export const FullMessageSchema = z.object({
   role: RoleSchema,
   message: z.string(),
   createdAt: z.string().optional(),
+  rowCount: z.number().optional(),
+  visualizedRowCount: z.number().optional(),
   chartData: z.array(z.record(z.string(), z.unknown())).optional(),
   chartConfig: ChartConfigSchema.optional(),
   chartOptions: z.array(ChartConfigSchema).optional(),
