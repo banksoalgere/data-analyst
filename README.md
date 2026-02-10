@@ -7,8 +7,10 @@ An intelligent data analytics platform that allows you to upload CSV files and a
 ### Backend (FastAPI + DuckDB + OpenAI)
 - **CSV Upload**: Stores data in DuckDB in-memory database
 - **AI SQL Generation**: Uses OpenAI to convert natural language to SQL
-- **Safe Execution**: Validates and executes queries with safety constraints
+- **Strict LLM Contract**: Fails fast if the model response is invalid or unavailable (no heuristic fallback)
+- **Safe Execution**: Validates read-only SQL and enforces row limits
 - **Chart Config**: AI determines the best visualization type
+- **Dataset Profiling**: Detects numeric/time/categorical fields and top correlations at upload time
 
 ### Frontend (Next.js + React + Recharts)
 - **File Upload**: Drag-and-drop CSV interface
@@ -71,6 +73,7 @@ The frontend will be available at `http://localhost:3000`
    - "Show me revenue trends over time"
    - "What are the top 5 products by sales?"
    - "Compare conversion rates by region"
+   - "Find the strongest correlations in this dataset"
 4. **View Results**: Get AI-generated insights with interactive charts
 
 ## API Endpoints
@@ -78,13 +81,14 @@ The frontend will be available at `http://localhost:3000`
 ### Backend Endpoints
 
 - `POST /upload` - Upload CSV file
-  - Returns: session_id, schema, preview, row_count
+  - Returns: session_id, schema, preview, row_count, profile
 
 - `POST /analyze` - Analyze data with natural language
-  - Body: `{session_id, question}`
-  - Returns: `{insight, chart_config, data, sql}`
+  - Body: `{session_id, question, conversation_id?}`
+  - Returns: `{insight, chart_config, data, sql, analysis_type, follow_up_questions, conversation_id}`
 
 - `GET /session/{session_id}` - Get session info
+- `GET /session/{session_id}/profile` - Get dataset profile info
 - `DELETE /session/{session_id}` - Delete session
 - `GET /health` - Health check
 
@@ -96,10 +100,12 @@ The frontend will be available at `http://localhost:3000`
 ## Security Features
 
 - **SQL Injection Protection**: Only SELECT queries allowed
-- **Query Validation**: Blacklists dangerous keywords
+- **Query Validation**: Rejects comments, multi-statement SQL, dangerous keywords, and IO functions
 - **Row Limits**: Maximum 1000 rows per query
 - **Session TTL**: Auto-cleanup after 1 hour
+- **Session Cap**: LRU cleanup prevents unbounded in-memory growth
 - **File Type Validation**: Only CSV files accepted
+- **File Size Validation**: Uploads are capped at 25MB
 
 ## Tech Stack
 

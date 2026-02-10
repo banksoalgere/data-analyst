@@ -2,11 +2,17 @@
 
 interface DataPreviewProps {
   schema: Array<{ column_name: string; column_type: string }>
-  preview: Array<Record<string, any>>
+  preview: Array<Record<string, unknown>>
   rowCount: number
+  profile?: {
+    numeric_columns?: string[]
+    temporal_columns?: string[]
+    categorical_columns?: string[]
+    top_correlations?: Array<{ column_x: string; column_y: string; correlation: number }>
+  }
 }
 
-export function DataPreview({ schema, preview, rowCount }: DataPreviewProps) {
+export function DataPreview({ schema, preview, rowCount, profile }: DataPreviewProps) {
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-6">
       <div className="mb-4">
@@ -39,6 +45,35 @@ export function DataPreview({ schema, preview, rowCount }: DataPreviewProps) {
           ))}
         </div>
       </div>
+
+      {profile && (
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="bg-neutral-950 border border-neutral-800 rounded p-3">
+            <div className="text-xs text-neutral-500 mb-2">Detected Numeric Columns</div>
+            <div className="text-sm text-neutral-200">
+              {(profile.numeric_columns ?? []).slice(0, 6).join(", ") || "None"}
+            </div>
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded p-3">
+            <div className="text-xs text-neutral-500 mb-2">Detected Time Columns</div>
+            <div className="text-sm text-neutral-200">
+              {(profile.temporal_columns ?? []).slice(0, 6).join(", ") || "None"}
+            </div>
+          </div>
+          {(profile.top_correlations ?? []).length > 0 && (
+            <div className="md:col-span-2 bg-neutral-950 border border-neutral-800 rounded p-3">
+              <div className="text-xs text-neutral-500 mb-2">Top Correlations</div>
+              <div className="space-y-1 text-sm text-neutral-200">
+                {(profile.top_correlations ?? []).slice(0, 3).map((pair) => (
+                  <div key={`${pair.column_x}-${pair.column_y}`}>
+                    {pair.column_x} ↔ {pair.column_y}: {pair.correlation}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Preview Table */}
       <div className="overflow-x-auto">

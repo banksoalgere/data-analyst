@@ -8,8 +8,17 @@ import { DataChatInterface } from "@/components/DataChatInterface"
 interface UploadResult {
   session_id: string
   schema: Array<{ column_name: string; column_type: string }>
-  preview: Array<Record<string, any>>
+  preview: Array<Record<string, unknown>>
   row_count: number
+  profile?: {
+    row_count: number
+    column_count: number
+    numeric_columns: string[]
+    temporal_columns: string[]
+    categorical_columns: string[]
+    top_correlations: Array<{ column_x: string; column_y: string; correlation: number }>
+    recommended_questions: string[]
+  }
 }
 
 export default function DashboardPage() {
@@ -55,6 +64,7 @@ export default function DashboardPage() {
                 schema={uploadResult.schema}
                 preview={uploadResult.preview}
                 rowCount={uploadResult.row_count}
+                profile={uploadResult.profile}
               />
             </div>
 
@@ -62,7 +72,10 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-semibold mb-4">Ask Questions</h2>
               <div className="h-[600px]">
-                <DataChatInterface sessionId={uploadResult.session_id} />
+                <DataChatInterface
+                  sessionId={uploadResult.session_id}
+                  profile={uploadResult.profile}
+                />
               </div>
             </div>
           </div>

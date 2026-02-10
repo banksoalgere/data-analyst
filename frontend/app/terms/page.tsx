@@ -29,8 +29,8 @@ export default function TermsPage() {
           <section className="border-t border-border pt-8">
             <h2 className="text-2xl font-bold mb-4 tracking-tight">01. Agreement to Terms</h2>
             <p className="text-muted-foreground leading-relaxed text-lg">
-              By accessing or using DataChat AI ("the Service"), you agree to be bound by these Terms and Conditions
-              ("Terms"). If you disagree with any part of these terms, you may not access the Service. These Terms
+              By accessing or using DataChat AI (&quot;the Service&quot;), you agree to be bound by these Terms and Conditions
+              (&quot;Terms&quot;). If you disagree with any part of these terms, you may not access the Service. These Terms
               apply to all visitors, users, and others who access or use the Service.
             </p>
           </section>
@@ -47,7 +47,7 @@ export default function TermsPage() {
               <li>— Interact with data through conversational interfaces</li>
             </ul>
             <p className="text-muted-foreground leading-relaxed mt-4">
-              The Service is provided "as is" and we reserve the right to modify or discontinue the Service
+              The Service is provided &quot;as is&quot; and we reserve the right to modify or discontinue the Service
               at any time with or without notice.
             </p>
           </section>
@@ -89,7 +89,7 @@ export default function TermsPage() {
           <section className="border-t border-border pt-8">
             <h2 className="text-2xl font-bold mb-4 tracking-tight">06. Disclaimer of Warranties</h2>
             <p className="text-muted-foreground leading-relaxed border-l-2 border-primary pl-6 py-2 bg-card/50">
-              THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+              THE SERVICE IS PROVIDED &quot;AS IS&quot; AND &quot;AS AVAILABLE&quot; WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
               INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
               NON-INFRINGEMENT.
             </p>

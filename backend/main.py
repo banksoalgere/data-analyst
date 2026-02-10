@@ -1,16 +1,23 @@
+import json
+import logging
+import os
+import tempfile
+import uuid
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
 from ai.main import AIClient
 from services.data_service import DataService
 from services.ai_service import AIAnalystService
-import logging
-import tempfile
-import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_ANALYTICS_HISTORY_TURNS = 12
 
 app = FastAPI(title="Chat with Database AI Analyst")
 
@@ -28,8 +35,12 @@ ai_client = AIClient()
 data_service = DataService()
 ai_analyst = AIAnalystService()
 
-# Store conversation contexts (in production, use a proper database)
 conversations = {}
+analytics_conversations = {}
+
+
+def get_analytics_conversation_key(session_id: str, conversation_id: str) -> str:
+    return f"{session_id}:{conversation_id}"
 
 
 class ChatRequest(BaseModel):
@@ -45,6 +56,7 @@ class ChatResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     session_id: str = Field(..., description="Session ID from CSV upload")
     question: str = Field(..., min_length=1, max_length=1000, description="Natural language question")
+    conversation_id: str | None = Field(default=None, max_length=100)
 
 
 @app.get("/")
@@ -65,17 +77,23 @@ async def upload_csv(file: UploadFile = File(...)):
     """
     try:
         # Validate file type
-        if not file.filename.endswith('.csv'):
+        if not file.filename or not file.filename.lower().endswith(".csv"):
             raise HTTPException(status_code=400, detail="Only CSV files are supported")
 
-        # Save to temporary file
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Max size is {MAX_UPLOAD_BYTES // (1024 * 1024)}MB.",
+            )
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
-            content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
         try:
-            # Process CSV with data service
             result = data_service.upload_csv(tmp_path)
             logger.info(f"CSV uploaded successfully: {file.filename}, session: {result['session_id']}")
             return result
@@ -84,9 +102,11 @@ async def upload_csv(file: UploadFile = File(...)):
             # Clean up temp file
             try:
                 os.unlink(tmp_path)
-            except:
+            except OSError:
                 pass
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error uploading CSV: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -101,25 +121,26 @@ async def analyze_data(request: AnalyzeRequest):
     try:
         logger.info(f"Analyzing question for session {request.session_id}: {request.question[:100]}...")
 
-        # Get session info
         session_info = data_service.get_session_info(request.session_id)
+        conversation_id = request.conversation_id or str(uuid.uuid4())
+        conv_key = get_analytics_conversation_key(request.session_id, conversation_id)
+        history = analytics_conversations.get(conv_key, [])
 
-        # Generate SQL and chart config using AI
         ai_response = ai_analyst.analyze_question(
             question=request.question,
-            schema=session_info["schema"]
+            schema=session_info["schema"],
+            table_name=session_info["table_name"],
+            profile=session_info.get("profile"),
+            conversation_history=history,
         )
 
-        # Execute SQL query
         df = data_service.execute_query(
             session_id=request.session_id,
             sql=ai_response["sql"]
         )
 
-        # Convert to JSON-serializable format
-        data = df.to_dict('records')
+        data = jsonable_encoder(df.to_dict("records"))
 
-        # Optionally enhance insight with actual data
         if len(data) > 0:
             enhanced_insight = ai_analyst.generate_insight_from_data(
                 question=request.question,
@@ -129,12 +150,19 @@ async def analyze_data(request: AnalyzeRequest):
         else:
             enhanced_insight = "No data found matching your query."
 
+        history.append({"role": "user", "content": request.question})
+        history.append({"role": "assistant", "content": enhanced_insight})
+        analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
+
         return {
             "insight": enhanced_insight,
             "chart_config": ai_response["chart_config"],
             "data": data,
             "sql": ai_response["sql"],
-            "row_count": len(data)
+            "row_count": len(data),
+            "analysis_type": ai_response.get("analysis_type", "other"),
+            "follow_up_questions": ai_response.get("follow_up_questions", []),
+            "conversation_id": conversation_id,
         }
 
     except ValueError as e:
@@ -154,11 +182,27 @@ async def get_session(session_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/session/{session_id}/profile")
+async def get_session_profile(session_id: str):
+    try:
+        session_info = data_service.get_session_info(session_id)
+        return {
+            "session_id": session_id,
+            "profile": session_info.get("profile", {}),
+            "row_count": session_info.get("row_count"),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session"""
     try:
         data_service.delete_session(session_id)
+        stale_keys = [key for key in analytics_conversations if key.startswith(f"{session_id}:")]
+        for key in stale_keys:
+            del analytics_conversations[key]
         return {"message": "Session deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting session: {e}")
@@ -211,7 +255,6 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {chunk}\n\n"
 
                     # Update stored context when done
-                    import json
                     chunk_data = json.loads(chunk)
                     if chunk_data.get("done") and "context" in chunk_data:
                         conversations[conversation_id] = chunk_data["context"]

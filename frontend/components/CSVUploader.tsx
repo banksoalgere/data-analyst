@@ -6,8 +6,17 @@ import { useDropzone } from 'react-dropzone'
 interface UploadResult {
   session_id: string
   schema: Array<{ column_name: string; column_type: string }>
-  preview: Array<Record<string, any>>
+  preview: Array<Record<string, unknown>>
   row_count: number
+  profile?: {
+    row_count: number
+    column_count: number
+    numeric_columns: string[]
+    temporal_columns: string[]
+    categorical_columns: string[]
+    top_correlations: Array<{ column_x: string; column_y: string; correlation: number }>
+    recommended_questions: string[]
+  }
 }
 
 interface CSVUploaderProps {

@@ -4,16 +4,34 @@ import { useState, FormEvent, useRef, useEffect } from "react"
 import { FullMessage } from "@/types/chat"
 import { DynamicChart } from "./DynamicChart"
 
-interface DataChatInterfaceProps {
-  sessionId: string | null
+interface DatasetProfile {
+  recommended_questions?: string[]
 }
 
-export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
+interface DataChatInterfaceProps {
+  sessionId: string | null
+  profile?: DatasetProfile | null
+}
+
+const DEFAULT_STARTERS = [
+  "Give me a high-level overview of this dataset.",
+  "What trends stand out over time?",
+  "Find meaningful correlations between key metrics.",
+]
+
+export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps) {
   const [messages, setMessages] = useState<FullMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [inputValue, setInputValue] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [showSql, setShowSql] = useState(false)
+  const [followUps, setFollowUps] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const starters = profile?.recommended_questions?.length
+    ? profile.recommended_questions.slice(0, 4)
+    : DEFAULT_STARTERS
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -23,14 +41,22 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
     scrollToBottom()
   }, [messages])
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!inputValue.trim() || loading || !sessionId) return
+  useEffect(() => {
+    setMessages([])
+    setConversationId(null)
+    setError(null)
+    setInputValue("")
+    setFollowUps([])
+  }, [sessionId])
 
+  const submitQuestion = async (question: string) => {
+    if (!question.trim() || loading || !sessionId) return
+
+    const trimmed = question.trim()
     const userMessage: FullMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      message: inputValue
+      message: trimmed,
     }
 
     setMessages((prev) => [...prev, userMessage])
@@ -46,32 +72,42 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
         },
         body: JSON.stringify({
           session_id: sessionId,
-          question: inputValue
+          question: trimmed,
+          conversation_id: conversationId,
         }),
       })
 
+      const payload = await response.json()
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Analysis failed')
+        throw new Error(payload.detail || 'Analysis failed')
       }
-
-      const result = await response.json()
 
       const assistantMessage: FullMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        message: result.insight,
-        chartData: result.data,
-        chartConfig: result.chart_config
+        message: payload.insight,
+        chartData: payload.data,
+        chartConfig: payload.chart_config,
+        sql: payload.sql,
+        analysisType: payload.analysis_type,
+        followUpQuestions: payload.follow_up_questions,
       }
 
+      if (payload.conversation_id) {
+        setConversationId(payload.conversation_id)
+      }
+      setFollowUps(Array.isArray(payload.follow_up_questions) ? payload.follow_up_questions.slice(0, 3) : [])
       setMessages((prev) => [...prev, assistantMessage])
-
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    await submitQuestion(inputValue)
   }
 
   if (!sessionId) {
@@ -102,6 +138,18 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
               <p className="text-neutral-400">
                 Ask questions about your data in plain English
               </p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                {starters.map((starter) => (
+                  <button
+                    key={starter}
+                    type="button"
+                    className="text-xs border border-neutral-700 text-neutral-300 px-3 py-1.5 rounded hover:border-neutral-500 hover:text-white transition-colors"
+                    onClick={() => setInputValue(starter)}
+                  >
+                    {starter}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -121,6 +169,19 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
                   <div className="whitespace-pre-wrap mb-3">
                     {msg.message}
                   </div>
+
+                  {msg.role === 'assistant' && msg.analysisType && (
+                    <div className="mb-3 text-xs inline-flex items-center gap-2 border border-neutral-700 text-neutral-300 px-2 py-1 rounded">
+                      <span className="uppercase tracking-wide">analysis</span>
+                      <span className="text-white">{msg.analysisType}</span>
+                    </div>
+                  )}
+
+                  {msg.role === 'assistant' && showSql && msg.sql && (
+                    <pre className="mb-3 bg-black/40 border border-neutral-700 text-neutral-300 text-xs p-3 overflow-auto rounded">
+                      {msg.sql}
+                    </pre>
+                  )}
 
                   {/* Render chart if available */}
                   {msg.role === 'assistant' && msg.chartData && msg.chartConfig && (
@@ -155,6 +216,19 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
       {/* Input */}
       <div className="border-t border-neutral-800 p-4">
         <div className="max-w-4xl mx-auto">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-xs text-neutral-500">
+              Conversation: {conversationId ?? "new"}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSql((value) => !value)}
+              className="text-xs text-neutral-400 hover:text-white transition-colors border border-neutral-700 px-2 py-1 rounded"
+            >
+              {showSql ? "Hide SQL" : "Show SQL"}
+            </button>
+          </div>
+
           {error && (
             <div className="mb-3 bg-red-950/50 border border-red-900 text-red-400 px-4 py-2 rounded-lg text-sm">
               {error}
@@ -176,6 +250,22 @@ export function DataChatInterface({ sessionId }: DataChatInterfaceProps) {
               {loading ? 'Analyzing...' : 'Ask'}
             </button>
           </form>
+
+          {followUps.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {followUps.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => submitQuestion(question)}
+                  className="text-xs border border-neutral-700 text-neutral-300 px-3 py-1.5 rounded hover:border-neutral-500 hover:text-white transition-colors"
+                  disabled={loading}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

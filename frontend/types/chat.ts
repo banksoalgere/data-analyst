@@ -89,8 +89,11 @@ export const FullMessageSchema = z.object({
     role: RoleSchema,
     message: z.string(),
     createdAt: z.string().datetime().optional(), // ISO 8601 format
-    chartData: z.array(z.record(z.any())).optional(), // Optional chart data
+    chartData: z.array(z.record(z.string(), z.any())).optional(), // Optional chart data
     chartConfig: ChartConfigSchema.optional(), // Optional chart configuration
+    sql: z.string().optional(),
+    analysisType: z.string().optional(),
+    followUpQuestions: z.array(z.string()).optional(),
 });
 
 // =============================================================================

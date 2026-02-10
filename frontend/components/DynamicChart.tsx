@@ -28,7 +28,7 @@ interface ChartConfig {
 }
 
 interface DynamicChartProps {
-  data: Array<Record<string, any>>
+  data: Array<Record<string, unknown>>
   config: ChartConfig
 }
 
@@ -52,12 +52,34 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
     )
   }
 
+  const groupedKeys = config.groupBy
+    ? Array.from(new Set(data.map((row) => String(row[config.groupBy as string])))).slice(0, 8)
+    : []
+
+  const groupedData = config.groupBy
+    ? Array.from(
+      data.reduce((acc, row) => {
+        const xValue = String(row[config.xKey])
+        const groupValue = String(row[config.groupBy as string])
+        const yRaw = Number(row[config.yKey])
+        if (!xValue || !groupValue || Number.isNaN(yRaw)) return acc
+
+        if (!acc.has(xValue)) {
+          acc.set(xValue, { [config.xKey]: xValue })
+        }
+        const bucket = acc.get(xValue) as Record<string, unknown>
+        bucket[groupValue] = (Number(bucket[groupValue] ?? 0) + yRaw)
+        return acc
+      }, new Map<string, Record<string, unknown>>()).values()
+    )
+    : data
+
   const renderChart = () => {
     switch (config.type) {
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={data}>
+            <LineChart data={groupedData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
               <XAxis
                 dataKey={config.xKey}
@@ -76,14 +98,27 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
               <Legend
                 wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
               />
-              <Line
-                type="monotone"
-                dataKey={config.yKey}
-                stroke={COLORS[0]}
-                strokeWidth={2}
-                dot={{ fill: COLORS[0], r: 4 }}
-                activeDot={{ r: 6 }}
-              />
+              {groupedKeys.length > 0 ? groupedKeys.map((key, index) => (
+                <Line
+                  key={key}
+                  type="monotone"
+                  name={key}
+                  dataKey={key}
+                  stroke={COLORS[index % COLORS.length]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                />
+              )) : (
+                <Line
+                  type="monotone"
+                  dataKey={config.yKey}
+                  stroke={COLORS[0]}
+                  strokeWidth={2}
+                  dot={{ fill: COLORS[0], r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -91,7 +126,7 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={data}>
+            <BarChart data={groupedData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
               <XAxis
                 dataKey={config.xKey}
@@ -110,7 +145,17 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
               <Legend
                 wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
               />
-              <Bar dataKey={config.yKey} fill={COLORS[0]} radius={[4, 4, 0, 0]} />
+              {groupedKeys.length > 0 ? groupedKeys.map((key, index) => (
+                <Bar
+                  key={key}
+                  name={key}
+                  dataKey={key}
+                  fill={COLORS[index % COLORS.length]}
+                  radius={[4, 4, 0, 0]}
+                />
+              )) : (
+                <Bar dataKey={config.yKey} fill={COLORS[0]} radius={[4, 4, 0, 0]} />
+              )}
             </BarChart>
           </ResponsiveContainer>
         )
@@ -118,7 +163,7 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
       case 'area':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <AreaChart data={data}>
+            <AreaChart data={groupedData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
               <XAxis
                 dataKey={config.xKey}
@@ -137,13 +182,26 @@ export function DynamicChart({ data, config }: DynamicChartProps) {
               <Legend
                 wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
               />
-              <Area
-                type="monotone"
-                dataKey={config.yKey}
-                stroke={COLORS[0]}
-                fill={COLORS[0]}
-                fillOpacity={0.6}
-              />
+              {groupedKeys.length > 0 ? groupedKeys.map((key, index) => (
+                <Area
+                  key={key}
+                  type="monotone"
+                  name={key}
+                  dataKey={key}
+                  stroke={COLORS[index % COLORS.length]}
+                  fill={COLORS[index % COLORS.length]}
+                  fillOpacity={0.2}
+                  stackId="grouped"
+                />
+              )) : (
+                <Area
+                  type="monotone"
+                  dataKey={config.yKey}
+                  stroke={COLORS[0]}
+                  fill={COLORS[0]}
+                  fillOpacity={0.6}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         )
