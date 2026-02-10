@@ -15,12 +15,14 @@ from ai.main import AIClient
 from models.api_models import (
     ActionApproveRequest,
     ActionDraftRequest,
+    AnomalyLabRequest,
     AnalysisSprintRequest,
     AnalyzeRequest,
     CausalLabRequest,
     ChatRequest,
     ChatResponse,
     HypothesisRequest,
+    RegressionLabRequest,
 )
 from services.ai_service import AIAnalystService
 from services.analysis_runtime import AnalysisRuntime
@@ -29,7 +31,7 @@ from services.data_service import DataService, SUPPORTED_TABULAR_EXTENSIONS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_ANALYTICS_HISTORY_TURNS = 12
 
 app = FastAPI(title="Chat with Database AI Analyst")
@@ -412,6 +414,63 @@ async def run_causal_lab(request: CausalLabRequest):
         raise
     except Exception as e:
         logger.error("Error running causal lab: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ml/regression")
+async def run_regression_lab(request: RegressionLabRequest):
+    try:
+        session_info = data_service.get_session_info(request.session_id)
+        table_name = session_info["table_name"]
+        df = data_service.execute_query(
+            session_id=request.session_id,
+            sql=f"SELECT * FROM {table_name}",
+            max_rows=request.max_rows,
+        )
+        if df.empty:
+            raise HTTPException(status_code=400, detail="No rows available for regression analysis.")
+
+        return runtime.build_regression_result(
+            data_frame=df,
+            target_column=request.target_column,
+            feature_columns=request.feature_columns,
+            test_fraction=request.test_fraction,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error running regression lab: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ml/anomalies")
+async def run_anomaly_lab(request: AnomalyLabRequest):
+    try:
+        session_info = data_service.get_session_info(request.session_id)
+        table_name = session_info["table_name"]
+        df = data_service.execute_query(
+            session_id=request.session_id,
+            sql=f"SELECT * FROM {table_name}",
+            max_rows=request.max_rows,
+        )
+        if df.empty:
+            raise HTTPException(status_code=400, detail="No rows available for anomaly detection.")
+
+        return runtime.detect_anomalies(
+            data_frame=df,
+            metric_column=request.metric_column,
+            group_by=request.group_by,
+            z_threshold=request.z_threshold,
+            max_results=request.max_results,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error running anomaly lab: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

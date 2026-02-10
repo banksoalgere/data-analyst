@@ -39,6 +39,26 @@ class CausalLabRequest(BaseModel):
     max_drivers: int = Field(default=6, ge=2, le=12, description="Maximum driver findings to return")
 
 
+class RegressionLabRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID from upload")
+    target_column: str = Field(..., min_length=1, max_length=200, description="Numeric target column")
+    feature_columns: list[str] | None = Field(
+        default=None,
+        description="Optional feature columns; if omitted defaults are auto-selected",
+    )
+    test_fraction: float = Field(default=0.2, ge=0.1, le=0.4, description="Test split fraction")
+    max_rows: int = Field(default=12000, ge=500, le=50000, description="Maximum rows sampled from session table")
+
+
+class AnomalyLabRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID from upload")
+    metric_column: str = Field(..., min_length=1, max_length=200, description="Numeric metric column")
+    group_by: str | None = Field(default=None, max_length=200, description="Optional grouping column")
+    z_threshold: float = Field(default=3.0, ge=1.5, le=8.0, description="Absolute z-score threshold")
+    max_results: int = Field(default=25, ge=5, le=100, description="Maximum anomalies returned")
+    max_rows: int = Field(default=20000, ge=500, le=100000, description="Maximum rows sampled from session table")
+
+
 class ActionDraftRequest(BaseModel):
     session_id: str = Field(..., description="Session ID from upload")
     question: str = Field(..., min_length=1, max_length=1000)

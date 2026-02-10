@@ -70,7 +70,8 @@ class AIAnalystService:
         chart_type = chart_type_raw.strip().lower()
         chart_type = CHART_TYPE_ALIASES.get(chart_type, chart_type)
         if chart_type not in CHART_TYPES:
-            raise ValueError(f"AI response has unsupported {field_name}.type")
+            logger.warning("Unsupported %s.type '%s'; falling back to 'bar'", field_name, chart_type_raw)
+            chart_type = "bar"
 
         x_key = chart_config.get("xKey")
         y_key = chart_config.get("yKey")
@@ -420,7 +421,7 @@ Return JSON in this exact shape:
         if not valid_probe_ids:
             raise ValueError("Executed probes missing probe_id values.")
 
-        probes_json = json.dumps(executed_probes, indent=2, default=str)
+        probes_json = json.dumps(executed_probes, default=str, separators=(",", ":"))
 
         system_prompt = """You are a principal data analyst.
 Synthesize multiple probe results into one clear answer.

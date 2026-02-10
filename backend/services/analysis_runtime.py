@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import math
+import os
 import random
 from typing import Any, Callable
 import uuid
@@ -11,15 +13,28 @@ from fastapi.encoders import jsonable_encoder
 
 from services.ai_service import AIAnalystService
 from services.data_service import DataService
-from services.runtime import ActionRuntime, CausalRuntime, ChartRuntime, TrustRuntime
+from services.runtime import ActionRuntime, CausalRuntime, ChartRuntime, MLRuntime, TrustRuntime
 
 DEFAULT_QUERY_LIMIT = 1200
 SPRINT_QUERY_LIMIT = 2000
 PROBE_QUERY_LIMIT = 900
 MAX_EXPLORATION_PROBES = 5
-LLM_ROW_SAMPLE_LIMIT = 24
-LLM_CHART_SAMPLE_LIMIT = 48
+LLM_ROW_SAMPLE_LIMIT = 10
+LLM_CHART_SAMPLE_LIMIT = 20
+LLM_MAX_SAMPLE_COLUMNS = 10
 MIN_STRONG_PRIMARY_ROWS = 12
+
+
+def _resolve_probe_max_workers() -> int:
+    raw = os.getenv("ANALYSIS_PROBE_MAX_WORKERS", "4")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 4
+    return max(1, value)
+
+
+PROBE_MAX_WORKERS = _resolve_probe_max_workers()
 
 
 class AnalysisRuntime:
@@ -31,6 +46,7 @@ class AnalysisRuntime:
         self.chart_runtime = ChartRuntime()
         self.trust_runtime = TrustRuntime()
         self.causal_runtime = CausalRuntime()
+        self.ml_runtime = MLRuntime()
         self.action_runtime = ActionRuntime()
 
     def build_chart_options(
@@ -157,10 +173,12 @@ class AnalysisRuntime:
         query_data: list[dict[str, Any]],
         chart_data: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        columns = list(query_data[0].keys()) if query_data else []
+        columns = list(query_data[0].keys())[:LLM_MAX_SAMPLE_COLUMNS] if query_data else []
+        sample_rows = self._random_sample_rows(query_data, LLM_ROW_SAMPLE_LIMIT)
+        compact_rows = [{key: row.get(key) for key in columns} for row in sample_rows]
         return {
             "columns": columns,
-            "sample_rows": self._random_sample_rows(query_data, LLM_ROW_SAMPLE_LIMIT),
+            "sample_rows": compact_rows,
             "chart_sample": self._random_sample_rows(chart_data, LLM_CHART_SAMPLE_LIMIT),
         }
 
@@ -286,24 +304,13 @@ class AnalysisRuntime:
             )
 
         executed_probes: list[dict[str, Any]] = []
-        for probe in plan["probes"]:
-            if progress_callback:
-                progress_callback(
-                    {
-                        "phase": "probe_started",
-                        "probe_id": probe["probe_id"],
-                        "question": probe["question"],
-                        "analysis_type": probe["analysis_type"],
-                    }
-                )
-            try:
-                df = self.data_service.execute_query(
-                    session_id=session_id,
-                    sql=probe["sql"],
-                    max_rows=PROBE_QUERY_LIMIT,
-                )
-            except Exception as exc:
-                raise ValueError(f"Exploration probe '{probe['probe_id']}' failed: {exc}") from exc
+
+        def execute_probe(probe: dict[str, Any]) -> dict[str, Any]:
+            df = self.data_service.execute_query(
+                session_id=session_id,
+                sql=probe["sql"],
+                max_rows=PROBE_QUERY_LIMIT,
+            )
 
             query_data = jsonable_encoder(df.to_dict("records"))
             chart_options, chart_data = self._render_chart_payload(
@@ -312,32 +319,64 @@ class AnalysisRuntime:
                 analysis_type=probe["analysis_type"],
                 sprint_mode=False,
             )
+            return {
+                "probe_id": probe["probe_id"],
+                "question": probe["question"],
+                "analysis_type": probe["analysis_type"],
+                "sql": probe["sql"],
+                "rationale": probe["rationale"],
+                "row_count": len(query_data),
+                "query_data": query_data,
+                "chart_options": chart_options,
+                "chart_data": chart_data,
+                "chart_config": chart_options[0] if chart_options else probe["chart_hint"],
+                "llm_sample": self._build_probe_llm_sample(query_data=query_data, chart_data=chart_data),
+                "stats": self._build_probe_stats(df),
+            }
 
-            executed_probes.append(
-                {
-                    "probe_id": probe["probe_id"],
-                    "question": probe["question"],
-                    "analysis_type": probe["analysis_type"],
-                    "sql": probe["sql"],
-                    "rationale": probe["rationale"],
-                    "row_count": len(query_data),
-                    "query_data": query_data,
-                    "chart_options": chart_options,
-                    "chart_data": chart_data,
-                    "chart_config": chart_options[0] if chart_options else probe["chart_hint"],
-                    "llm_sample": self._build_probe_llm_sample(query_data=query_data, chart_data=chart_data),
-                    "stats": self._build_probe_stats(df),
-                }
-            )
-            if progress_callback:
-                progress_callback(
-                    {
-                        "phase": "probe_completed",
-                        "probe_id": probe["probe_id"],
-                        "row_count": len(query_data),
-                        "analysis_type": probe["analysis_type"],
-                    }
-                )
+        max_workers = min(len(plan["probes"]), PROBE_MAX_WORKERS)
+        probe_by_id = {probe["probe_id"]: probe for probe in plan["probes"]}
+        completed_by_id: dict[str, dict[str, Any]] = {}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_probe_id = {}
+            for probe in plan["probes"]:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "probe_started",
+                            "probe_id": probe["probe_id"],
+                            "question": probe["question"],
+                            "analysis_type": probe["analysis_type"],
+                        }
+                    )
+                future = executor.submit(execute_probe, probe)
+                future_to_probe_id[future] = probe["probe_id"]
+
+            for future in as_completed(future_to_probe_id):
+                probe_id = future_to_probe_id[future]
+                probe = probe_by_id[probe_id]
+                try:
+                    executed = future.result()
+                except Exception as exc:
+                    raise ValueError(f"Exploration probe '{probe_id}' failed: {exc}") from exc
+
+                completed_by_id[probe_id] = executed
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "probe_completed",
+                            "probe_id": probe["probe_id"],
+                            "row_count": executed["row_count"],
+                            "analysis_type": probe["analysis_type"],
+                        }
+                    )
+
+        executed_probes = [
+            completed_by_id[probe["probe_id"]]
+            for probe in plan["probes"]
+            if probe["probe_id"] in completed_by_id
+        ]
 
         self.data_service.persist_analysis_artifacts(
             session_id=session_id,
@@ -381,6 +420,14 @@ class AnalysisRuntime:
                 }
                 for probe in executed_probes
             ]
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "synthesis_started",
+                    "probe_count": len(synthesis_input),
+                }
+            )
 
         synthesis = self.ai_analyst.synthesize_exploration(
             question=question,
@@ -434,6 +481,10 @@ class AnalysisRuntime:
                     "rationale": probe["rationale"],
                     "sql": probe["sql"],
                     "row_count": probe["row_count"],
+                    "visualized_row_count": len(probe.get("chart_data") or []),
+                    "chart_config": probe["chart_config"],
+                    "chart_options": probe["chart_options"],
+                    "chart_data": probe["chart_data"],
                 }
                 for probe in executed_probes
             ],
@@ -536,3 +587,33 @@ class AnalysisRuntime:
 
     def execute_action(self, action: dict[str, Any]) -> dict[str, Any]:
         return self.action_runtime.execute_action(action)
+
+    def build_regression_result(
+        self,
+        data_frame: pd.DataFrame,
+        target_column: str,
+        feature_columns: list[str] | None = None,
+        test_fraction: float = 0.2,
+    ) -> dict[str, Any]:
+        return self.ml_runtime.build_regression_result(
+            data_frame=data_frame,
+            target_column=target_column,
+            feature_columns=feature_columns,
+            test_fraction=test_fraction,
+        )
+
+    def detect_anomalies(
+        self,
+        data_frame: pd.DataFrame,
+        metric_column: str,
+        group_by: str | None = None,
+        z_threshold: float = 3.0,
+        max_results: int = 25,
+    ) -> dict[str, Any]:
+        return self.ml_runtime.detect_anomalies(
+            data_frame=data_frame,
+            metric_column=metric_column,
+            group_by=group_by,
+            z_threshold=z_threshold,
+            max_results=max_results,
+        )

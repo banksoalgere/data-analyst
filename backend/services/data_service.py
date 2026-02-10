@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timedelta
 from itertools import combinations
@@ -120,11 +121,7 @@ class DataService:
             if now - session["last_accessed_at"] > self.session_ttl
         ]
         for sid in expired:
-            try:
-                self.sessions[sid]["connection"].close()
-            except Exception:
-                pass
-            del self.sessions[sid]
+            self.delete_session(sid)
 
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired sessions")
@@ -315,6 +312,27 @@ class DataService:
         )
 
     @staticmethod
+    def _configure_connection(conn: duckdb.DuckDBPyConnection) -> None:
+        conn.execute("SET threads TO 2")
+        conn.execute("SET memory_limit = '1GB'")
+
+    def _open_reader_connection(self, session_id: str) -> duckdb.DuckDBPyConnection:
+        session = self.sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found or expired")
+
+        db_path = session.get("db_path")
+        if not isinstance(db_path, str) or not db_path:
+            raise ValueError(f"Session {session_id} is missing a database path.")
+
+        try:
+            conn = duckdb.connect(database=db_path, read_only=True)
+        except Exception:
+            conn = duckdb.connect(database=db_path)
+        self._configure_connection(conn)
+        return conn
+
+    @staticmethod
     def _safe_json_loads(raw: Any, fallback: Any) -> Any:
         if not isinstance(raw, str) or not raw:
             return fallback
@@ -347,10 +365,12 @@ class DataService:
         if session_id is None:
             session_id = str(uuid.uuid4())
 
+        conn: duckdb.DuckDBPyConnection | None = None
+        session_dir = tempfile.mkdtemp(prefix="dataanalyst_session_")
+        db_path = os.path.join(session_dir, "session.duckdb")
         try:
-            conn = duckdb.connect(":memory:")
-            conn.execute("SET threads TO 2")
-            conn.execute("SET memory_limit = '1GB'")
+            conn = duckdb.connect(db_path)
+            self._configure_connection(conn)
 
             table_name = "uploaded_data"
             self._load_tabular_file(conn, table_name, file_path)
@@ -379,6 +399,8 @@ class DataService:
                 "row_count": row_count,
                 "created_at": now,
                 "last_accessed_at": now,
+                "db_path": db_path,
+                "session_dir": session_dir,
             }
 
             logger.info(f"Created session {session_id} with {row_count} rows")
@@ -393,6 +415,20 @@ class DataService:
 
         except Exception as e:
             logger.error(f"Error uploading CSV: {e}")
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            try:
+                if os.path.isdir(session_dir):
+                    for child in os.listdir(session_dir):
+                        child_path = os.path.join(session_dir, child)
+                        if os.path.isfile(child_path):
+                            os.unlink(child_path)
+                    os.rmdir(session_dir)
+            except OSError:
+                pass
             raise ValueError(f"Failed to process CSV file: {str(e)}")
 
     def upload_csv(self, file_path: str, session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -413,8 +449,19 @@ class DataService:
         Returns:
             DataFrame with query results
         """
-        conn = self._get_session_connection(session_id)
-        return execute_safe_query(conn, sql, max_rows)
+        self._cleanup_expired_sessions()
+        if session_id not in self.sessions:
+            raise ValueError(f"Session {session_id} not found or expired")
+        self.sessions[session_id]["last_accessed_at"] = datetime.now()
+
+        reader_conn = self._open_reader_connection(session_id)
+        try:
+            return execute_safe_query(reader_conn, sql, max_rows)
+        finally:
+            try:
+                reader_conn.close()
+            except Exception:
+                pass
 
     def persist_analysis_artifacts(
         self,
@@ -589,9 +636,20 @@ class DataService:
     def delete_session(self, session_id: str):
         """Manually delete a session."""
         if session_id in self.sessions:
+            session = self.sessions[session_id]
             try:
-                self.sessions[session_id]["connection"].close()
+                session["connection"].close()
             except Exception:
                 pass
+            session_dir = session.get("session_dir")
+            if isinstance(session_dir, str) and session_dir and os.path.isdir(session_dir):
+                try:
+                    for child in os.listdir(session_dir):
+                        child_path = os.path.join(session_dir, child)
+                        if os.path.isfile(child_path):
+                            os.unlink(child_path)
+                    os.rmdir(session_dir)
+                except OSError:
+                    pass
             del self.sessions[session_id]
             logger.info(f"Deleted session {session_id}")

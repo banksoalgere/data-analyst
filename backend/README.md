@@ -27,5 +27,7 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 - `POST /analysis/sprint`
 - `POST /hypotheses`
 - `POST /causal-lab`
+- `POST /ml/regression`
+- `POST /ml/anomalies`
 
 See the project root `README.md` for full API details and streaming event contracts.

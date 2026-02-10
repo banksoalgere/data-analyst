@@ -45,6 +45,10 @@ export const ExplorationProbeSchema = z
     rationale: z.string().optional(),
     sql: z.string(),
     row_count: z.number(),
+    visualized_row_count: z.number().optional(),
+    chart_config: ChartConfigSchema.optional(),
+    chart_options: z.array(ChartConfigSchema).optional(),
+    chart_data: z.array(z.record(z.string(), z.unknown())).optional(),
   })
   .passthrough()
 

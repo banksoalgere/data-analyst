@@ -4,6 +4,7 @@ export type AnalyzeProgressPhase =
   | "plan_ready"
   | "probe_started"
   | "probe_completed"
+  | "synthesis_started"
   | "synthesis_completed";
 
 export interface AnalyzeProgressEvent {
@@ -91,6 +92,9 @@ export function formatProgressMessage(event: AnalyzeProgressEvent): string {
     const primaryProbe =
       typeof event.primary_probe_id === "string" ? event.primary_probe_id : "primary probe";
     return `Synthesized final answer using ${primaryProbe}`;
+  }
+  if (phase === "synthesis_started") {
+    return "Synthesizing final answer with probe evidence...";
   }
   return "Analyzing data...";
 }

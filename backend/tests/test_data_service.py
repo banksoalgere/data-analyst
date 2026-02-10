@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
 
@@ -136,6 +137,42 @@ class DataServiceUploadTests(unittest.TestCase):
             self.assertEqual(by_probe["probe_1"]["chart_hint"]["type"], "bar")
             self.assertEqual(by_probe["probe_2"]["columns"], ["region", "revenue"])
             self.assertTrue(by_probe["probe_1"]["sample_rows"])
+        finally:
+            os.unlink(tmp_path)
+            if "uploaded" in locals() and "session_id" in uploaded:
+                service.delete_session(uploaded["session_id"])
+
+    def test_execute_query_supports_parallel_reads(self):
+        csv_rows = ["category,value"]
+        for index in range(1, 201):
+            bucket = "A" if index % 2 == 0 else "B"
+            csv_rows.append(f"{bucket},{index}")
+        csv_content = "\n".join(csv_rows) + "\n"
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as handle:
+            handle.write(csv_content)
+            tmp_path = handle.name
+
+        service = DataService()
+        try:
+            uploaded = service.upload_file(tmp_path)
+            session_id = uploaded["session_id"]
+
+            sql_statements = [
+                "SELECT COUNT(*) AS row_count FROM uploaded_data",
+                "SELECT category, SUM(value) AS total_value FROM uploaded_data GROUP BY category ORDER BY category",
+                "SELECT AVG(value) AS avg_value FROM uploaded_data",
+            ]
+
+            def run_query(sql: str):
+                return service.execute_query(session_id=session_id, sql=sql, max_rows=500)
+
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                results = list(executor.map(run_query, sql_statements))
+
+            self.assertEqual(int(results[0].iloc[0]["row_count"]), 200)
+            self.assertEqual(set(results[1]["category"].tolist()), {"A", "B"})
+            self.assertGreater(float(results[2].iloc[0]["avg_value"]), 0.0)
         finally:
             os.unlink(tmp_path)
             if "uploaded" in locals() and "session_id" in uploaded:

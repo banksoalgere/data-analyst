@@ -4,6 +4,7 @@ import { useState } from "react"
 import { CSVUploader } from "@/components/CSVUploader"
 import { DataPreview } from "@/components/DataPreview"
 import { DataChatInterface } from "@/components/DataChatInterface"
+import { MLLab } from "@/components/MLLab"
 
 interface UploadResult {
   session_id: string
@@ -137,6 +138,8 @@ export default function DashboardPage() {
                 rowCount={uploadResult.row_count}
                 profile={uploadResult.profile}
               />
+
+              <MLLab sessionId={uploadResult.session_id} schema={uploadResult.schema} />
             </div>
           </section>
         )}
@@ -158,6 +161,15 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex-1 min-h-0">
+              <details className="mb-4 bg-neutral-900 border border-neutral-800 rounded-lg p-4">
+                <summary className="cursor-pointer text-sm text-neutral-200">
+                  Open ML Lab (regression + anomalies)
+                </summary>
+                <div className="mt-4">
+                  <MLLab sessionId={uploadResult.session_id} schema={uploadResult.schema} />
+                </div>
+              </details>
+
               <DataChatInterface
                 sessionId={uploadResult.session_id}
                 profile={uploadResult.profile}

@@ -21,6 +21,7 @@ Turn raw spreadsheets into decision-ready analysis in minutes.
 - Trust layer with confidence score, limitations, and provenance
 - Follow-up question generation for iterative exploration
 - Heuristic causal lab for likely drivers of a target metric
+- ML Lab with linear regression and z-score anomaly detection
 - Batch/sprint mode to run many hypotheses in one request
 
 ## Product Walkthrough (60 Seconds)
@@ -30,7 +31,8 @@ Turn raw spreadsheets into decision-ready analysis in minutes.
 3. Ask a question in chat.
 4. Watch plan/probe/synthesis progress stream in real time.
 5. Inspect charts, SQL, trust signals, and follow-up prompts.
-6. Draft an action artifact and approve it to produce a dry-run deliverable.
+6. Run advanced ML checks (regression, anomalies) from ML Lab.
+7. Draft an action artifact and approve it to produce a dry-run deliverable.
 
 ## Architecture
 
@@ -40,13 +42,14 @@ Turn raw spreadsheets into decision-ready analysis in minutes.
 - `services/data_service.py`: file ingestion, DuckDB session management, SQL safety validation
 - `services/ai_service.py`: LLM prompting, exploration planning, synthesis, strict JSON normalization
 - `services/analysis_runtime.py`: orchestration for probes, chart prep, trust scoring, and synthesis
-- `services/runtime/*`: charting, trust runtime, causal runtime, action runtime
+- `services/runtime/*`: charting, trust runtime, causal runtime, ml runtime, action runtime
 
 ### Frontend (`/frontend`)
 
 - `app/dashboard/page.tsx`: upload, summary, and chat workflow
 - `components/CSVUploader.tsx`: drag-and-drop spreadsheet upload
 - `components/DataChatInterface.tsx`: streaming chat UX and action workflow controls
+- `components/MLLab.tsx`: advanced regression and anomaly workflows
 - `components/data-chat/*`: assistant rendering, trust/exploration/action panels
 - `app/api/*`: Next.js proxy routes that forward to backend services
 
@@ -94,6 +97,8 @@ Open [http://127.0.0.1:3000/dashboard](http://127.0.0.1:3000/dashboard)
 - `POST /hypotheses`: generate candidate questions for exploration
 - `POST /analysis/sprint`: run multiple questions in one pass
 - `POST /causal-lab`: heuristic driver analysis for a target metric
+- `POST /ml/regression`: linear regression with metrics and top drivers
+- `POST /ml/anomalies`: z-score anomaly detection (global or grouped)
 - `POST /actions/draft`: create action artifacts from insights
 - `POST /actions/approve`: execute action in dry-run mode and return artifact
 
@@ -103,6 +108,7 @@ Open [http://127.0.0.1:3000/dashboard](http://127.0.0.1:3000/dashboard)
   - `phase: "plan_ready"` with `analysis_goal`, `probe_count`
   - `phase: "probe_started"` with `probe_id`, `question`
   - `phase: "probe_completed"` with `probe_id`, `row_count`
+  - `phase: "synthesis_started"` before final narrative generation
   - `phase: "synthesis_completed"` with `primary_probe_id`
 - Final result event (`type: "result"`):
   - `conversation_id`

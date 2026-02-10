@@ -11,6 +11,8 @@ interface AssistantMessageContentProps {
   showSql: boolean
   selectedChartIndex: number
   onChartSelect: (index: number) => void
+  selectedProbeId?: string | null
+  onProbeSelect: (probeId: string) => void
   onDraftActions: () => void
   onApproveAction: (actionId: string) => void
   drafting: boolean
@@ -22,11 +24,29 @@ export function AssistantMessageContent({
   showSql,
   selectedChartIndex,
   onChartSelect,
+  selectedProbeId,
+  onProbeSelect,
   onDraftActions,
   onApproveAction,
   drafting,
   approvingByAction,
 }: AssistantMessageContentProps) {
+  const probes = Array.isArray(message.exploration?.probes) ? message.exploration?.probes : []
+  const fallbackProbeId = message.exploration?.primary_probe_id ?? probes[0]?.probe_id
+  const activeProbeId = selectedProbeId ?? fallbackProbeId
+  const activeProbe = probes.find((probe) => probe.probe_id === activeProbeId)
+
+  const activeChartData =
+    Array.isArray(activeProbe?.chart_data) && activeProbe.chart_data.length > 0
+      ? activeProbe.chart_data
+      : message.chartData
+  const activeChartOptions =
+    Array.isArray(activeProbe?.chart_options) && activeProbe.chart_options.length > 0
+      ? activeProbe.chart_options
+      : message.chartOptions
+  const activeChartConfig = activeProbe?.chart_config ?? message.chartConfig
+  const activeSql = activeProbe?.sql ?? message.sql
+
   return (
     <>
       {message.analysisType && (
@@ -41,22 +61,32 @@ export function AssistantMessageContent({
       )}
 
       {message.exploration && (
-        <ExplorationPanel exploration={message.exploration} />
+        <ExplorationPanel
+          exploration={message.exploration}
+          selectedProbeId={activeProbeId}
+          onProbeSelect={onProbeSelect}
+        />
       )}
 
-      {showSql && message.sql && (
+      {showSql && activeSql && (
         <pre className="mb-3 bg-black/40 border border-neutral-700 text-neutral-300 text-xs p-3 overflow-auto rounded">
-          {message.sql}
+          {activeSql}
         </pre>
       )}
 
-      {message.chartData && message.chartConfig && (
+      {activeChartData && activeChartConfig && (
         <div className="mt-4">
-          {message.chartOptions && message.chartOptions.length > 1 && (
+          {activeProbe && (
+            <div className="mb-3 text-xs text-neutral-400">
+              Visualizing: <span className="text-neutral-200">{activeProbe.question}</span>
+            </div>
+          )}
+
+          {activeChartOptions && activeChartOptions.length > 1 && (
             <div className="mb-3 flex flex-wrap gap-2">
-              {message.chartOptions.map((option, index) => (
+              {activeChartOptions.map((option, index) => (
                 <button
-                  key={`${message.id}-${option.type}-${index}`}
+                  key={`${message.id}-${activeProbeId ?? "summary"}-${option.type}-${index}`}
                   type="button"
                   onClick={() => onChartSelect(index)}
                   className={`text-xs border px-2 py-1 rounded transition-colors ${
@@ -72,8 +102,8 @@ export function AssistantMessageContent({
           )}
 
           <DynamicChart
-            data={message.chartData}
-            config={message.chartOptions?.[selectedChartIndex] ?? message.chartConfig}
+            data={activeChartData}
+            config={activeChartOptions?.[selectedChartIndex] ?? activeChartConfig}
           />
         </div>
       )}
