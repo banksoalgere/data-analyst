@@ -46,7 +46,10 @@ export function DataChatInterface({
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
   const [followUps, setFollowUps] = useState<string[]>([])
+  const [viewMenuValue, setViewMenuValue] = useState("")
+  const [followUpMenuValue, setFollowUpMenuValue] = useState("")
   const [selectedChartByMessage, setSelectedChartByMessage] = useState<Record<string, number>>({})
+  const [selectedProbeByMessage, setSelectedProbeByMessage] = useState<Record<string, string>>({})
   const [draftingByMessage, setDraftingByMessage] = useState<Record<string, boolean>>({})
   const [approvingByAction, setApprovingByAction] = useState<Record<string, boolean>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -80,7 +83,10 @@ export function DataChatInterface({
     setInputValue("")
     setStreamProgress([])
     setFollowUps([])
+    setViewMenuValue("")
+    setFollowUpMenuValue("")
     setSelectedChartByMessage({})
+    setSelectedProbeByMessage({})
     setDraftingByMessage({})
     setApprovingByAction({})
   }, [sessionId])
@@ -281,7 +287,7 @@ export function DataChatInterface({
   }
 
   return (
-    <div className="flex flex-col h-full bg-neutral-950 border border-neutral-800 rounded-lg">
+    <div className="flex flex-col h-full bg-black">
       <div className="flex-1 overflow-y-auto p-6">
         <div className="w-full space-y-6">
           {messages.length === 0 && (
@@ -291,8 +297,7 @@ export function DataChatInterface({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
-              <h2 className="text-xl font-semibold text-white mb-2">Ready to Analyze</h2>
-              <p className="text-neutral-400">Ask questions about your data in plain English</p>
+              <p className="text-neutral-300">Ask questions about your data in plain English</p>
               {showStarterPrompts && (
                 <div className="mt-6 flex flex-wrap justify-center gap-2">
                   {starters.map((starter) => (
@@ -311,13 +316,13 @@ export function DataChatInterface({
           )}
 
           {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className="max-w-3xl w-full">
+            <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "w-full"}>
+              <div className={msg.role === "user" ? "max-w-2xl w-full" : "w-full"}>
                 <div
-                  className={`rounded-lg p-4 ${
+                  className={`rounded-lg ${
                     msg.role === "user"
-                      ? "bg-neutral-800 text-white ml-auto max-w-2xl"
-                      : "bg-neutral-900 border border-neutral-800 text-neutral-100"
+                      ? "bg-neutral-800 text-white ml-auto max-w-2xl p-4"
+                      : "bg-neutral-900 border border-neutral-800 text-neutral-100 p-5"
                   }`}
                 >
                   {msg.role === "assistant" ? (
@@ -330,6 +335,11 @@ export function DataChatInterface({
                         onChartSelect={(chartIndex) =>
                           setSelectedChartByMessage((prev) => ({ ...prev, [msg.id]: chartIndex }))
                         }
+                        selectedProbeId={selectedProbeByMessage[msg.id]}
+                        onProbeSelect={(probeId) => {
+                          setSelectedProbeByMessage((prev) => ({ ...prev, [msg.id]: probeId }))
+                          setSelectedChartByMessage((prev) => ({ ...prev, [msg.id]: 0 }))
+                        }}
                         onDraftActions={() => {
                           draftActionsForMessage(
                             msg.id,
@@ -377,15 +387,23 @@ export function DataChatInterface({
 
       <div className="border-t border-neutral-800 p-4">
         <div className="w-full">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-xs text-neutral-500">Conversation: {conversationId ?? "new"}</div>
-            <button
-              type="button"
-              onClick={() => setShowSql((value) => !value)}
-              className="text-xs text-neutral-400 hover:text-white transition-colors border border-neutral-700 px-2 py-1 rounded"
+          <div className="mb-3 flex justify-end">
+            <label htmlFor="chat-view-menu" className="sr-only">View menu</label>
+            <select
+              id="chat-view-menu"
+              value={viewMenuValue}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === "toggle-sql") {
+                  setShowSql((current) => !current)
+                }
+                setViewMenuValue("")
+              }}
+              className="bg-neutral-950 border border-neutral-700 text-xs text-neutral-300 px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-neutral-600"
             >
-              {showSql ? "Hide SQL" : "Show SQL"}
-            </button>
+              <option value="">View Menu</option>
+              <option value="toggle-sql">{showSql ? "Hide SQL" : "Show SQL"}</option>
+            </select>
           </div>
 
           {error && (
@@ -412,18 +430,27 @@ export function DataChatInterface({
           </form>
 
           {followUps.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {followUps.map((question) => (
-                <button
-                  key={question}
-                  type="button"
-                  onClick={() => submitQuestion(question)}
-                  className="text-xs border border-neutral-700 text-neutral-300 px-3 py-1.5 rounded hover:border-neutral-500 hover:text-white transition-colors"
-                  disabled={loading}
-                >
-                  {question}
-                </button>
-              ))}
+            <div className="mt-3 flex justify-end">
+              <label htmlFor="follow-up-menu" className="sr-only">Follow-up questions</label>
+              <select
+                id="follow-up-menu"
+                value={followUpMenuValue}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (!value) return
+                  void submitQuestion(value)
+                  setFollowUpMenuValue("")
+                }}
+                className="bg-neutral-950 border border-neutral-700 text-xs text-neutral-300 px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-neutral-600 min-w-[280px]"
+                disabled={loading}
+              >
+                <option value="">Follow-up Questions</option>
+                {followUps.map((question) => (
+                  <option key={question} value={question}>
+                    {question}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>
