@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -43,6 +44,8 @@ NUMERIC_TYPES = {
 }
 TEMPORAL_TYPE_KEYWORDS = {"DATE", "TIME", "TIMESTAMP"}
 TEXT_TYPES = {"VARCHAR", "TEXT", "CHAR", "STRING", "UUID"}
+SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xls", ".xlsm", ".xltx", ".xltm", ".xlsb"}
+SUPPORTED_TABULAR_EXTENSIONS = {".csv", *SUPPORTED_EXCEL_EXTENSIONS}
 
 
 def quote_identifier(name: str) -> str:
@@ -222,16 +225,70 @@ class DataService:
             "recommended_questions": recommended_questions[:6],
         }
 
-    def upload_csv(self, file_path: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    def _normalize_column_names(self, columns: list[Any]) -> list[str]:
+        normalized: list[str] = []
+        seen: dict[str, int] = {}
+
+        for index, raw_name in enumerate(columns):
+            base = str(raw_name).strip() if raw_name is not None else ""
+            if not base:
+                base = f"column_{index + 1}"
+            count = seen.get(base, 0)
+            seen[base] = count + 1
+            normalized.append(base if count == 0 else f"{base}_{count + 1}")
+
+        return normalized
+
+    def _load_tabular_file(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        table_name: str,
+        file_path: str,
+    ) -> None:
+        extension = os.path.splitext(file_path)[1].lower()
+        table_identifier = quote_identifier(table_name)
+
+        if extension == ".csv":
+            escaped_path = file_path.replace("'", "''")
+            conn.execute(f"""
+                CREATE TABLE {table_identifier} AS
+                SELECT * FROM read_csv_auto('{escaped_path}', header=true, sample_size=-1)
+            """)
+            return
+
+        if extension in SUPPORTED_EXCEL_EXTENSIONS:
+            try:
+                dataframe = pd.read_excel(file_path, sheet_name=0)
+            except Exception as exc:
+                raise ValueError(f"Failed to read Excel file: {exc}") from exc
+
+            if dataframe is None:
+                raise ValueError("Failed to read the first worksheet from Excel file.")
+
+            dataframe = dataframe.dropna(how="all")
+            dataframe.columns = self._normalize_column_names(list(dataframe.columns))
+
+            conn.register("uploaded_frame", dataframe)
+            conn.execute(
+                f"CREATE TABLE {table_identifier} AS SELECT * FROM uploaded_frame"
+            )
+            conn.unregister("uploaded_frame")
+            return
+
+        raise ValueError(
+            f"Unsupported file type '{extension}'. Supported types: {', '.join(sorted(SUPPORTED_TABULAR_EXTENSIONS))}"
+        )
+
+    def upload_file(self, file_path: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Upload CSV and create DuckDB table
+        Upload CSV/Excel and create DuckDB table.
 
         Args:
             file_path: Path to CSV file
             session_id: Optional existing session ID, creates new if None
 
         Returns:
-            Dict with session_id, schema, preview, and row_count
+            Dict with session_id, schema, preview, and row_count.
         """
         self._cleanup_expired_sessions()
         self._enforce_session_cap()
@@ -245,11 +302,7 @@ class DataService:
             conn.execute("SET memory_limit = '1GB'")
 
             table_name = "uploaded_data"
-            escaped_path = file_path.replace("'", "''")
-            conn.execute(f"""
-                CREATE TABLE {quote_identifier(table_name)} AS
-                SELECT * FROM read_csv_auto('{escaped_path}', header=true, sample_size=-1)
-            """)
+            self._load_tabular_file(conn, table_name, file_path)
 
             schema_df = conn.execute(f"DESCRIBE {quote_identifier(table_name)}").df()
             schema = schema_df.to_dict("records")
@@ -289,6 +342,12 @@ class DataService:
         except Exception as e:
             logger.error(f"Error uploading CSV: {e}")
             raise ValueError(f"Failed to process CSV file: {str(e)}")
+
+    def upload_csv(self, file_path: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Backward-compatible wrapper for legacy callers.
+        """
+        return self.upload_file(file_path=file_path, session_id=session_id)
 
     def execute_query(self, session_id: str, sql: str, max_rows: int = 1000) -> pd.DataFrame:
         """

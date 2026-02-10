@@ -58,6 +58,18 @@ class DataServiceUploadTests(unittest.TestCase):
             if "session_id" in locals().get("uploaded", {}):
                 service.delete_session(uploaded["session_id"])
 
+    def test_upload_file_rejects_unsupported_extension(self):
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as handle:
+            handle.write("not tabular")
+            tmp_path = handle.name
+
+        service = DataService()
+        try:
+            with self.assertRaises(ValueError):
+                service.upload_file(tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,17 @@ interface CSVUploaderProps {
   onUploadSuccess: (result: UploadResult) => void
 }
 
+const ACCEPTED_FILE_TYPES = {
+  'text/csv': ['.csv'],
+  'application/csv': ['.csv'],
+  'application/vnd.ms-excel': ['.xls', '.csv'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.ms-excel.sheet.macroEnabled.12': ['.xlsm'],
+  'application/vnd.ms-excel.template.macroEnabled.12': ['.xltm'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.template': ['.xltx'],
+  'application/vnd.ms-excel.sheet.binary.macroEnabled.12': ['.xlsb'],
+} as const
+
 export function CSVUploader({ onUploadSuccess }: CSVUploaderProps) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,10 +70,7 @@ export function CSVUploader({ onUploadSuccess }: CSVUploaderProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      'text/csv': ['.csv'],
-      'application/vnd.ms-excel': ['.csv'],
-    },
+    accept: ACCEPTED_FILE_TYPES,
     maxFiles: 1,
     disabled: uploading,
   })
@@ -106,18 +114,18 @@ export function CSVUploader({ onUploadSuccess }: CSVUploaderProps) {
               </svg>
 
               {isDragActive ? (
-                <p className="text-white font-medium">Drop your CSV file here</p>
+                <p className="text-white font-medium">Drop your spreadsheet here</p>
               ) : (
                 <>
                   <p className="text-white font-medium">
-                    Drag and drop a CSV file here
+                    Drag and drop an Excel/CSV file here
                   </p>
                   <p className="text-neutral-400 text-sm">or click to browse</p>
                 </>
               )}
 
               <p className="text-neutral-500 text-xs mt-2">
-                Supported format: CSV files only
+                Supported formats: .csv, .xlsx, .xls, .xlsm, .xltx, .xltm, .xlsb
               </p>
             </>
           )}

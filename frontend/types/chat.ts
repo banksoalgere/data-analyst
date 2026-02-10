@@ -91,6 +91,7 @@ export const FullMessageSchema = z.object({
     createdAt: z.string().datetime().optional(), // ISO 8601 format
     chartData: z.array(z.record(z.string(), z.any())).optional(), // Optional chart data
     chartConfig: ChartConfigSchema.optional(), // Optional chart configuration
+    chartOptions: z.array(ChartConfigSchema).optional(),
     sql: z.string().optional(),
     analysisType: z.string().optional(),
     followUpQuestions: z.array(z.string()).optional(),

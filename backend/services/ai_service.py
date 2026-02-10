@@ -138,6 +138,8 @@ Rules:
 - Always include aliases for derived columns
 - For time series, ensure proper date formatting and ordering
 - Column names in chart_config must match the SELECT clause output columns
+- Choose chart types based on data shape; do not default to bar unless it is clearly best.
+- Prefer scatter for numeric-vs-numeric correlation questions and line/area for time trends.
 
 Chart types available:
 - "line" - for trends over time

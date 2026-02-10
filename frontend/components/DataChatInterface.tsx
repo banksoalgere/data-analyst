@@ -27,6 +27,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
   const [followUps, setFollowUps] = useState<string[]>([])
+  const [selectedChartByMessage, setSelectedChartByMessage] = useState<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const starters = profile?.recommended_questions?.length
@@ -34,7 +35,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
     : DEFAULT_STARTERS
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
   }
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
     setError(null)
     setInputValue("")
     setFollowUps([])
+    setSelectedChartByMessage({})
   }, [sessionId])
 
   const submitQuestion = async (question: string) => {
@@ -88,6 +90,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
         message: payload.insight,
         chartData: payload.data,
         chartConfig: payload.chart_config,
+        chartOptions: Array.isArray(payload.chart_options) ? payload.chart_options : [],
         sql: payload.sql,
         analysisType: payload.analysis_type,
         followUpQuestions: payload.follow_up_questions,
@@ -186,9 +189,29 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
                   {/* Render chart if available */}
                   {msg.role === 'assistant' && msg.chartData && msg.chartConfig && (
                     <div className="mt-4">
+                      {msg.chartOptions && msg.chartOptions.length > 1 && (
+                        <div className="mb-3 flex flex-wrap gap-2">
+                          {msg.chartOptions.map((option, index) => (
+                            <button
+                              key={`${msg.id}-${option.type}-${index}`}
+                              type="button"
+                              onClick={() => setSelectedChartByMessage((prev) => ({ ...prev, [msg.id]: index }))}
+                              className={`text-xs border px-2 py-1 rounded transition-colors ${
+                                (selectedChartByMessage[msg.id] ?? 0) === index
+                                  ? 'border-neutral-500 text-white bg-neutral-800'
+                                  : 'border-neutral-700 text-neutral-300 hover:text-white hover:border-neutral-500'
+                              }`}
+                            >
+                              {option.type}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <DynamicChart
                         data={msg.chartData}
-                        config={msg.chartConfig}
+                        config={
+                          msg.chartOptions?.[selectedChartByMessage[msg.id] ?? 0] ?? msg.chartConfig
+                        }
                       />
                     </div>
                   )}

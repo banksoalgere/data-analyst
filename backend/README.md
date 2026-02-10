@@ -1,10 +1,10 @@
 ## Backend
 
-FastAPI service for CSV upload, profiling, and AI-driven analytics.
+FastAPI service for CSV/Excel upload, profiling, and AI-driven analytics.
 
 ### Key behavior
 
-- Uploads CSV files into DuckDB in-memory sessions.
+- Uploads CSV/Excel files into DuckDB in-memory sessions.
 - Builds dataset profile metadata (column types, candidate correlations, starter questions).
 - Runs strict read-only SQL validation before query execution.
 - Uses OpenAI for SQL + insight generation.
