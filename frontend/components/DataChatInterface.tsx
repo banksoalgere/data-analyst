@@ -273,7 +273,7 @@ export function DataChatInterface({
   return (
     <div className="flex flex-col h-full bg-neutral-950 border border-neutral-800 rounded-lg">
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
+        <div className="w-full space-y-6">
           {messages.length === 0 && (
             <div className="text-center py-12">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-neutral-800 rounded-full mb-4">
@@ -363,7 +363,7 @@ export function DataChatInterface({
       </div>
 
       <div className="border-t border-neutral-800 p-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-xs text-neutral-500">Conversation: {conversationId ?? "new"}</div>
             <button
