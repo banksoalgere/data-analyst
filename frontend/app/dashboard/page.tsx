@@ -26,6 +26,8 @@ type DashboardStep = "upload" | "summary" | "chat"
 export default function DashboardPage() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [step, setStep] = useState<DashboardStep>("upload")
+  const [prefilledQuestion, setPrefilledQuestion] = useState<string | null>(null)
+  const [prefilledQuestionToken, setPrefilledQuestionToken] = useState(0)
 
   const handleUploadSuccess = (result: UploadResult) => {
     setUploadResult(result)
@@ -35,6 +37,14 @@ export default function DashboardPage() {
   const handleUploadReset = () => {
     setUploadResult(null)
     setStep("upload")
+    setPrefilledQuestion(null)
+    setPrefilledQuestionToken(0)
+  }
+
+  const handleSuggestedQuestionClick = (question: string) => {
+    setPrefilledQuestion(question)
+    setPrefilledQuestionToken((token) => token + 1)
+    setStep("chat")
   }
 
   return (
@@ -80,7 +90,10 @@ export default function DashboardPage() {
                     Upload New File
                   </button>
                   <button
-                    onClick={() => setStep("chat")}
+                    onClick={() => {
+                      setPrefilledQuestion(null)
+                      setStep("chat")
+                    }}
                     className="text-sm text-black bg-white hover:bg-neutral-200 transition-colors px-4 py-2 rounded font-medium"
                   >
                     Continue to Chat
@@ -90,15 +103,20 @@ export default function DashboardPage() {
 
               <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5">
                 <h3 className="text-base font-semibold mb-3">Suggested Questions</h3>
+                <p className="text-xs text-neutral-500 mb-4">
+                  Click any suggested question to open it directly in the chat input.
+                </p>
                 {(uploadResult.profile?.recommended_questions ?? []).length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {(uploadResult.profile?.recommended_questions ?? []).slice(0, 8).map((question) => (
-                      <div
+                      <button
                         key={question}
-                        className="text-xs border border-neutral-700 text-neutral-300 px-3 py-2 rounded"
+                        type="button"
+                        onClick={() => handleSuggestedQuestionClick(question)}
+                        className="text-xs border border-neutral-700 text-neutral-300 px-3 py-2 rounded hover:border-neutral-500 hover:text-white transition-colors text-left"
                       >
                         {question}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
@@ -148,6 +166,8 @@ export default function DashboardPage() {
                 sessionId={uploadResult.session_id}
                 profile={uploadResult.profile}
                 showStarterPrompts={false}
+                prefilledQuestion={prefilledQuestion}
+                prefilledQuestionToken={prefilledQuestionToken}
               />
             </div>
           </section>

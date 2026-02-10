@@ -20,6 +20,8 @@ interface DataChatInterfaceProps {
   sessionId: string | null
   profile?: DatasetProfile | null
   showStarterPrompts?: boolean
+  prefilledQuestion?: string | null
+  prefilledQuestionToken?: number
 }
 
 const DEFAULT_STARTERS = [
@@ -32,6 +34,8 @@ export function DataChatInterface({
   sessionId,
   profile,
   showStarterPrompts = true,
+  prefilledQuestion,
+  prefilledQuestionToken,
 }: DataChatInterfaceProps) {
   const [messages, setMessages] = useState<FullMessage[]>([])
   const [loading, setLoading] = useState(false)
@@ -79,6 +83,11 @@ export function DataChatInterface({
     setDraftingByMessage({})
     setApprovingByAction({})
   }, [sessionId])
+
+  useEffect(() => {
+    if (!prefilledQuestion) return
+    setInputValue(prefilledQuestion)
+  }, [prefilledQuestion, prefilledQuestionToken])
 
   const submitQuestion = async (question: string) => {
     if (!question.trim() || loading || !sessionId) return
