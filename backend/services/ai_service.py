@@ -279,6 +279,9 @@ Rules:
 - Column names in chart_config must match the SELECT clause output columns
 - Choose chart types based on data shape; do not default to bar unless it is clearly best.
 - Prefer scatter for numeric-vs-numeric correlation questions and line/area for time trends.
+- "insight" must be GitHub-flavored Markdown, concise, and easy to scan.
+- Prefer a short heading and 2-4 bullet points when there are multiple findings.
+- Do not include raw HTML.
 
 Chart types available:
 - "line" - for trends over time
@@ -295,7 +298,7 @@ Return JSON in this exact format:
 {{
   "analysis_type": "trend|correlation|comparison|distribution|overview|other",
   "sql": "SELECT ... FROM {table_name} ...",
-  "insight": "Brief explanation of what this query reveals",
+  "insight": "Markdown summary of what this query reveals",
   "chart_config": {{
     "type": "line|bar|scatter|pie|area",
     "xKey": "column_name_from_select",
@@ -428,6 +431,8 @@ Rules:
   (prefer richer multi-row probes over single-row aggregates unless all probes are sparse)
 - Insight must reference concrete evidence from probe results
 - Keep insight concise but specific
+- "insight" must be GitHub-flavored Markdown (no raw HTML)
+- Prefer a short heading and bullet points when summarizing multiple findings
 - Include up to 3 precise follow-up questions
 - Add limitations when evidence is weak or incomplete
 - Return valid JSON only
@@ -449,7 +454,7 @@ Return JSON in this exact shape:
 {{
   "analysis_type": "trend|correlation|comparison|distribution|overview|other",
   "primary_probe_id": "one_of_{sorted(valid_probe_ids)}",
-  "insight": "final answer grounded in the probes",
+  "insight": "Markdown final answer grounded in the probes",
   "chart_config": {{
     "type": "line|bar|scatter|pie|area",
     "xKey": "column_from_primary_probe",
@@ -491,7 +496,8 @@ SQL Query: {sql_query}
 Sample Results (first {len(sample_data)} rows):
 {json.dumps(sample_data, indent=2, default=str)}
 
-Provide a 1-2 sentence insight highlighting key findings or trends."""
+Provide a concise Markdown insight highlighting key findings or trends.
+Use a short heading and bullets when that improves readability."""
 
         try:
             response = self.client.chat.completions.create(

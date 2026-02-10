@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { FullMessage } from "@/types/chat"
 import { AssistantMessageContent } from "@/components/data-chat/AssistantMessageContent"
+import { MarkdownMessage } from "@/components/data-chat/MarkdownMessage"
 import {
   AnalyzeProgressEvent,
   buildAssistantMessageFromAnalyzePayload,
@@ -319,27 +320,30 @@ export function DataChatInterface({
                       : "bg-neutral-900 border border-neutral-800 text-neutral-100"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap mb-3">{msg.message}</div>
-
-                  {msg.role === "assistant" && (
-                    <AssistantMessageContent
-                      message={msg}
-                      showSql={showSql}
-                      selectedChartIndex={selectedChartByMessage[msg.id] ?? 0}
-                      onChartSelect={(chartIndex) =>
-                        setSelectedChartByMessage((prev) => ({ ...prev, [msg.id]: chartIndex }))
-                      }
-                      onDraftActions={() => {
-                        draftActionsForMessage(
-                          msg.id,
-                          previousUserQuestionByAssistantId[msg.id] ?? "Follow-up actions for this insight",
-                          msg
-                        )
-                      }}
-                      onApproveAction={(actionId) => approveAction(msg.id, actionId)}
-                      drafting={Boolean(draftingByMessage[msg.id])}
-                      approvingByAction={approvingByAction}
-                    />
+                  {msg.role === "assistant" ? (
+                    <>
+                      <MarkdownMessage content={msg.message} />
+                      <AssistantMessageContent
+                        message={msg}
+                        showSql={showSql}
+                        selectedChartIndex={selectedChartByMessage[msg.id] ?? 0}
+                        onChartSelect={(chartIndex) =>
+                          setSelectedChartByMessage((prev) => ({ ...prev, [msg.id]: chartIndex }))
+                        }
+                        onDraftActions={() => {
+                          draftActionsForMessage(
+                            msg.id,
+                            previousUserQuestionByAssistantId[msg.id] ?? "Follow-up actions for this insight",
+                            msg
+                          )
+                        }}
+                        onApproveAction={(actionId) => approveAction(msg.id, actionId)}
+                        drafting={Boolean(draftingByMessage[msg.id])}
+                        approvingByAction={approvingByAction}
+                      />
+                    </>
+                  ) : (
+                    <div className="whitespace-pre-wrap">{msg.message}</div>
                   )}
                 </div>
               </div>

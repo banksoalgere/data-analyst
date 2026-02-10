@@ -55,10 +55,16 @@ export function parseAnalyzeStreamEvent(payload: string): AnalyzeStreamEvent | n
   try {
     const parsed = JSON.parse(payload) as Record<string, unknown>;
     const type = typeof parsed.type === "string" ? parsed.type : "";
-    if (type !== "progress" && type !== "error" && type !== "result") {
-      return null;
+    if (type === "progress") {
+      return parsed as unknown as AnalyzeProgressEvent;
     }
-    return parsed as AnalyzeStreamEvent;
+    if (type === "error") {
+      return parsed as unknown as AnalyzeErrorEvent;
+    }
+    if (type === "result") {
+      return parsed as unknown as AnalyzeResultEvent;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -110,4 +116,3 @@ export function buildAssistantMessageFromAnalyzePayload(payload: Record<string, 
     exploration: (payload.exploration ?? undefined) as FullMessage["exploration"],
   };
 }
-
