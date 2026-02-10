@@ -70,6 +70,77 @@ class DataServiceUploadTests(unittest.TestCase):
         finally:
             os.unlink(tmp_path)
 
+    def test_persist_and_load_analysis_artifacts(self):
+        csv_content = (
+            "date,revenue,region\n"
+            "2025-01-01,100,US\n"
+            "2025-02-01,200,US\n"
+            "2025-03-01,300,EU\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as handle:
+            handle.write(csv_content)
+            tmp_path = handle.name
+
+        service = DataService()
+        try:
+            uploaded = service.upload_file(tmp_path)
+            session_id = uploaded["session_id"]
+            run_id = "test_run_1"
+
+            service.persist_analysis_artifacts(
+                session_id=session_id,
+                run_id=run_id,
+                question="overview",
+                analysis_goal="find key patterns",
+                artifacts=[
+                    {
+                        "probe_id": "probe_1",
+                        "question": "overview metrics",
+                        "analysis_type": "overview",
+                        "rationale": "baseline snapshot",
+                        "sql": "SELECT SUM(revenue) AS total_revenue FROM uploaded_data",
+                        "row_count": 1,
+                        "chart_config": {"type": "bar", "xKey": "metric", "yKey": "value"},
+                        "graph_data": [{"metric": "total_revenue", "value": 600}],
+                        "llm_sample": {
+                            "columns": ["total_revenue"],
+                            "sample_rows": [{"total_revenue": 600}],
+                            "chart_sample": [{"metric": "total_revenue", "value": 600}],
+                        },
+                        "stats": {"column_count": 1},
+                    },
+                    {
+                        "probe_id": "probe_2",
+                        "question": "revenue by region",
+                        "analysis_type": "comparison",
+                        "rationale": "segment differences",
+                        "sql": "SELECT region, SUM(revenue) AS revenue FROM uploaded_data GROUP BY region",
+                        "row_count": 2,
+                        "chart_config": {"type": "bar", "xKey": "region", "yKey": "revenue"},
+                        "graph_data": [{"region": "US", "revenue": 300}, {"region": "EU", "revenue": 300}],
+                        "llm_sample": {
+                            "columns": ["region", "revenue"],
+                            "sample_rows": [{"region": "US", "revenue": 300}],
+                            "chart_sample": [{"region": "US", "revenue": 300}],
+                        },
+                        "stats": {"column_count": 2},
+                    },
+                ],
+            )
+
+            summaries = service.load_analysis_artifact_summaries(session_id=session_id, run_id=run_id)
+            self.assertEqual(len(summaries), 2)
+            by_probe = {item["probe_id"]: item for item in summaries}
+            self.assertIn("probe_1", by_probe)
+            self.assertIn("probe_2", by_probe)
+            self.assertEqual(by_probe["probe_1"]["chart_hint"]["type"], "bar")
+            self.assertEqual(by_probe["probe_2"]["columns"], ["region", "revenue"])
+            self.assertTrue(by_probe["probe_1"]["sample_rows"])
+        finally:
+            os.unlink(tmp_path)
+            if "uploaded" in locals() and "session_id" in uploaded:
+                service.delete_session(uploaded["session_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

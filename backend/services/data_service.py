@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -279,6 +280,56 @@ class DataService:
             f"Unsupported file type '{extension}'. Supported types: {', '.join(sorted(SUPPORTED_TABULAR_EXTENSIONS))}"
         )
 
+    def _ensure_analysis_tables(self, conn: duckdb.DuckDBPyConnection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_runs (
+                run_id VARCHAR PRIMARY KEY,
+                question VARCHAR,
+                analysis_goal VARCHAR,
+                probe_count INTEGER,
+                created_at TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_probe_artifacts (
+                artifact_id VARCHAR PRIMARY KEY,
+                run_id VARCHAR,
+                probe_id VARCHAR,
+                question VARCHAR,
+                analysis_type VARCHAR,
+                rationale VARCHAR,
+                sql TEXT,
+                row_count INTEGER,
+                chart_type VARCHAR,
+                x_key VARCHAR,
+                y_key VARCHAR,
+                graph_data_json TEXT,
+                llm_sample_json TEXT,
+                stats_json TEXT,
+                created_at TIMESTAMP
+            )
+            """
+        )
+
+    @staticmethod
+    def _safe_json_loads(raw: Any, fallback: Any) -> Any:
+        if not isinstance(raw, str) or not raw:
+            return fallback
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _get_session_connection(self, session_id: str) -> duckdb.DuckDBPyConnection:
+        self._cleanup_expired_sessions()
+        if session_id not in self.sessions:
+            raise ValueError(f"Session {session_id} not found or expired")
+        self.sessions[session_id]["last_accessed_at"] = datetime.now()
+        return self.sessions[session_id]["connection"]
+
     def upload_file(self, file_path: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Upload CSV/Excel and create DuckDB table.
@@ -303,6 +354,7 @@ class DataService:
 
             table_name = "uploaded_data"
             self._load_tabular_file(conn, table_name, file_path)
+            self._ensure_analysis_tables(conn)
 
             schema_df = conn.execute(f"DESCRIBE {quote_identifier(table_name)}").df()
             schema = schema_df.to_dict("records")
@@ -361,13 +413,160 @@ class DataService:
         Returns:
             DataFrame with query results
         """
-        self._cleanup_expired_sessions()
-        if session_id not in self.sessions:
-            raise ValueError(f"Session {session_id} not found or expired")
-
-        conn = self.sessions[session_id]["connection"]
-        self.sessions[session_id]["last_accessed_at"] = datetime.now()
+        conn = self._get_session_connection(session_id)
         return execute_safe_query(conn, sql, max_rows)
+
+    def persist_analysis_artifacts(
+        self,
+        session_id: str,
+        run_id: str,
+        question: str,
+        analysis_goal: str,
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        if not run_id.strip():
+            raise ValueError("run_id is required for analysis artifacts.")
+        if not artifacts:
+            return
+
+        conn = self._get_session_connection(session_id)
+        self._ensure_analysis_tables(conn)
+        created_at = datetime.now()
+
+        conn.execute("DELETE FROM analysis_probe_artifacts WHERE run_id = ?", [run_id])
+        conn.execute("DELETE FROM analysis_runs WHERE run_id = ?", [run_id])
+        conn.execute(
+            """
+            INSERT INTO analysis_runs (run_id, question, analysis_goal, probe_count, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [run_id, question.strip(), analysis_goal.strip(), len(artifacts), created_at],
+        )
+
+        insert_sql = """
+            INSERT INTO analysis_probe_artifacts (
+                artifact_id,
+                run_id,
+                probe_id,
+                question,
+                analysis_type,
+                rationale,
+                sql,
+                row_count,
+                chart_type,
+                x_key,
+                y_key,
+                graph_data_json,
+                llm_sample_json,
+                stats_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
+        for artifact in artifacts:
+            probe_id = str(artifact.get("probe_id", "")).strip()
+            if not probe_id:
+                continue
+            chart_config = artifact.get("chart_config")
+            chart_type = chart_config.get("type") if isinstance(chart_config, dict) else None
+            x_key = chart_config.get("xKey") if isinstance(chart_config, dict) else None
+            y_key = chart_config.get("yKey") if isinstance(chart_config, dict) else None
+
+            conn.execute(
+                insert_sql,
+                [
+                    str(uuid.uuid4()),
+                    run_id,
+                    probe_id,
+                    str(artifact.get("question", "")).strip(),
+                    str(artifact.get("analysis_type", "")).strip(),
+                    str(artifact.get("rationale", "")).strip(),
+                    str(artifact.get("sql", "")).strip(),
+                    int(artifact.get("row_count") or 0),
+                    chart_type,
+                    x_key,
+                    y_key,
+                    json.dumps(artifact.get("graph_data", []), default=str),
+                    json.dumps(artifact.get("llm_sample", {}), default=str),
+                    json.dumps(artifact.get("stats", {}), default=str),
+                    created_at,
+                ],
+            )
+
+    def load_analysis_artifact_summaries(self, session_id: str, run_id: str) -> list[dict[str, Any]]:
+        if not run_id.strip():
+            return []
+
+        conn = self._get_session_connection(session_id)
+        self._ensure_analysis_tables(conn)
+        records = conn.execute(
+            """
+            SELECT
+                probe_id,
+                question,
+                analysis_type,
+                rationale,
+                sql,
+                row_count,
+                chart_type,
+                x_key,
+                y_key,
+                llm_sample_json,
+                stats_json
+            FROM analysis_probe_artifacts
+            WHERE run_id = ?
+            ORDER BY probe_id ASC
+            """,
+            [run_id],
+        ).fetchall()
+
+        summaries: list[dict[str, Any]] = []
+        for (
+            probe_id,
+            question,
+            analysis_type,
+            rationale,
+            sql,
+            row_count,
+            chart_type,
+            x_key,
+            y_key,
+            llm_sample_json,
+            stats_json,
+        ) in records:
+            llm_sample = self._safe_json_loads(llm_sample_json, {})
+            stats = self._safe_json_loads(stats_json, {})
+
+            summary = {
+                "probe_id": probe_id,
+                "question": question,
+                "analysis_type": analysis_type,
+                "rationale": rationale,
+                "sql": sql,
+                "row_count": int(row_count or 0),
+                "chart_hint": {
+                    "type": chart_type or "bar",
+                    "xKey": x_key or "",
+                    "yKey": y_key or "",
+                },
+                "stats": stats if isinstance(stats, dict) else {},
+            }
+
+            if isinstance(llm_sample, dict):
+                columns = llm_sample.get("columns", [])
+                sample_rows = llm_sample.get("sample_rows", [])
+                chart_sample = llm_sample.get("chart_sample", [])
+                summary["columns"] = columns if isinstance(columns, list) else []
+                summary["sample_rows"] = sample_rows if isinstance(sample_rows, list) else []
+                summary["chart_sample"] = chart_sample if isinstance(chart_sample, list) else []
+            else:
+                summary["columns"] = []
+                summary["sample_rows"] = []
+                summary["chart_sample"] = []
+            summaries.append(summary)
+
+        return summaries
 
     def get_session_info(self, session_id: str) -> Dict[str, Any]:
         """Get session metadata."""

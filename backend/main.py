@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -127,8 +128,29 @@ async def analyze_data(request: AnalyzeRequest):
             sprint_mode=False,
         )
 
+        assistant_context = analysis_result["insight"]
+        exploration = analysis_result.get("exploration")
+        if isinstance(exploration, dict):
+            probes = exploration.get("probes")
+            primary_probe_id = exploration.get("primary_probe_id")
+            if isinstance(probes, list) and probes:
+                recap_lines: list[str] = []
+                for probe in probes[:5]:
+                    if not isinstance(probe, dict):
+                        continue
+                    probe_id = str(probe.get("probe_id", "")).strip() or "probe"
+                    prefix = "*" if probe_id == primary_probe_id else "-"
+                    recap_lines.append(
+                        f"{prefix} {probe_id}: {str(probe.get('question', '')).strip()} "
+                        f"(rows={probe.get('row_count', 'n/a')})"
+                    )
+                if recap_lines:
+                    assistant_context = (
+                        f"{assistant_context}\n\nExploration recap:\n" + "\n".join(recap_lines)
+                    )
+
         history.append({"role": "user", "content": request.question})
-        history.append({"role": "assistant", "content": analysis_result["insight"]})
+        history.append({"role": "assistant", "content": assistant_context})
         analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
 
         return {**analysis_result, "conversation_id": conversation_id}
@@ -138,6 +160,106 @@ async def analyze_data(request: AnalyzeRequest):
     except Exception as e:
         logger.error("Error analyzing data: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze/stream")
+async def analyze_data_stream(request: AnalyzeRequest):
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    async def producer():
+        try:
+            logger.info("Streaming analysis for session %s: %s...", request.session_id, request.question[:100])
+
+            session_info = data_service.get_session_info(request.session_id)
+            conversation_id = request.conversation_id or str(uuid.uuid4())
+            conv_key = get_analytics_conversation_key(request.session_id, conversation_id)
+            history = analytics_conversations.get(conv_key, [])
+
+            def on_progress(event: dict[str, Any]):
+                payload = {"type": "progress", **event}
+                loop.call_soon_threadsafe(queue.put_nowait, payload)
+
+            analysis_result = await asyncio.to_thread(
+                runtime.run_analysis,
+                request.session_id,
+                session_info,
+                request.question,
+                history,
+                False,
+                on_progress,
+            )
+
+            assistant_context = analysis_result["insight"]
+            exploration = analysis_result.get("exploration")
+            if isinstance(exploration, dict):
+                probes = exploration.get("probes")
+                primary_probe_id = exploration.get("primary_probe_id")
+                if isinstance(probes, list) and probes:
+                    recap_lines: list[str] = []
+                    for probe in probes[:5]:
+                        if not isinstance(probe, dict):
+                            continue
+                        probe_id = str(probe.get("probe_id", "")).strip() or "probe"
+                        prefix = "*" if probe_id == primary_probe_id else "-"
+                        recap_lines.append(
+                            f"{prefix} {probe_id}: {str(probe.get('question', '')).strip()} "
+                            f"(rows={probe.get('row_count', 'n/a')})"
+                        )
+                    if recap_lines:
+                        assistant_context = (
+                            f"{assistant_context}\n\nExploration recap:\n" + "\n".join(recap_lines)
+                        )
+
+            history.append({"role": "user", "content": request.question})
+            history.append({"role": "assistant", "content": assistant_context})
+            analytics_conversations[conv_key] = history[-MAX_ANALYTICS_HISTORY_TURNS:]
+
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {
+                    "type": "result",
+                    "done": True,
+                    "conversation_id": conversation_id,
+                    "payload": analysis_result,
+                },
+            )
+        except ValueError as e:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "error", "detail": str(e), "status": 400, "done": True},
+            )
+        except Exception as e:
+            logger.error("Error streaming data analysis: %s", e)
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "error", "detail": str(e), "status": 500, "done": True},
+            )
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    producer_task = asyncio.create_task(producer())
+
+    async def event_generator():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item, default=str)}\n\n"
+        finally:
+            if not producer_task.done():
+                producer_task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/hypotheses")

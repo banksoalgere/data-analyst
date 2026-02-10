@@ -13,6 +13,19 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
 CHART_TYPES = {"line", "bar", "scatter", "pie", "area"}
+CHART_TYPE_ALIASES = {
+    "lines": "line",
+    "time_series": "line",
+    "timeseries": "line",
+    "column": "bar",
+    "columns": "bar",
+    "histogram": "bar",
+    "stacked_bar": "bar",
+    "stacked_column": "bar",
+    "dot": "scatter",
+    "bubble": "scatter",
+    "donut": "pie",
+}
 ANALYSIS_TYPES = {"trend", "correlation", "comparison", "distribution", "overview", "other"}
 
 
@@ -50,7 +63,12 @@ class AIAnalystService:
         if not isinstance(chart_config, dict):
             raise ValueError(f"AI response missing valid '{field_name}' object")
 
-        chart_type = chart_config.get("type")
+        chart_type_raw = chart_config.get("type")
+        if not isinstance(chart_type_raw, str) or not chart_type_raw.strip():
+            raise ValueError(f"AI response missing valid {field_name}.type")
+
+        chart_type = chart_type_raw.strip().lower()
+        chart_type = CHART_TYPE_ALIASES.get(chart_type, chart_type)
         if chart_type not in CHART_TYPES:
             raise ValueError(f"AI response has unsupported {field_name}.type")
 
@@ -201,17 +219,15 @@ class AIAnalystService:
         self,
         system_prompt: str,
         user_prompt: str,
-        temperature: float = 0.2,
     ) -> Dict[str, Any]:
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=temperature,
             )
             content = response.choices[0].message.content
             if not content:
@@ -298,7 +314,6 @@ Return JSON in this exact format:
             result = self._call_json_model(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                temperature=0.3,
             )
             normalized = self._normalize_response(result)
             logger.info(f"Generated SQL: {normalized['sql'][:100]}...")
@@ -350,6 +365,12 @@ Rules:
 - Use different probes to triangulate the answer (trend, segmentation, correlation, outliers as appropriate)
 - SQL statements must not be duplicates
 - chart_hint columns must match projected SQL columns
+- For broad/overview questions, include:
+  - one KPI aggregate probe (single-row is allowed),
+  - one segmented probe with GROUP BY (multi-row),
+  - one trend or distribution probe (multi-row).
+- Do not make all probes single-row aggregates.
+- Prefer probes that return interpretable evidence (not only a single summary row).
 - Return valid JSON only
 """
 
@@ -378,7 +399,6 @@ Return JSON in this exact shape:
         result = self._call_json_model(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.3,
         )
         return self._normalize_exploration_plan(result, max_probes=max_probes)
 
@@ -404,6 +424,8 @@ Synthesize multiple probe results into one clear answer.
 
 Rules:
 - Choose exactly one primary_probe_id from the provided probe_ids
+- Select the probe with strongest evidence density as primary when possible
+  (prefer richer multi-row probes over single-row aggregates unless all probes are sparse)
 - Insight must reference concrete evidence from probe results
 - Keep insight concise but specific
 - Include up to 3 precise follow-up questions
@@ -415,6 +437,13 @@ Rules:
 Exploration goal: {exploration_goal}
 Executed probe summaries:
 {probes_json}
+
+Each probe summary may include:
+- columns
+- sample_rows (random, limited)
+- chart_sample (random, limited)
+- stats (numeric and categorical aggregates)
+Use these compact summaries as evidence, not exhaustive raw data.
 
 Return JSON in this exact shape:
 {{
@@ -441,7 +470,6 @@ Return JSON in this exact shape:
         result = self._call_json_model(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.2,
         )
         return self._normalize_exploration_synthesis(result, valid_probe_ids=valid_probe_ids)
 
@@ -467,13 +495,11 @@ Provide a 1-2 sentence insight highlighting key findings or trends."""
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5",
                 messages=[
                     {"role": "system", "content": "You are a data analyst. Provide concise insights."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.5,
-                max_tokens=150,
             )
 
             return response.choices[0].message.content.strip()
@@ -527,7 +553,6 @@ Rules:
         result = self._call_json_model(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.35,
         )
 
         hypotheses = result.get("hypotheses")
@@ -607,7 +632,6 @@ Return JSON in this exact shape:
         result = self._call_json_model(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.25,
         )
 
         actions = result.get("actions")

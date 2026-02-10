@@ -24,6 +24,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
   const [loading, setLoading] = useState(false)
   const [inputValue, setInputValue] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [streamProgress, setStreamProgress] = useState<string[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
   const [followUps, setFollowUps] = useState<string[]>([])
@@ -59,11 +60,36 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
     setConversationId(null)
     setError(null)
     setInputValue("")
+    setStreamProgress([])
     setFollowUps([])
     setSelectedChartByMessage({})
     setDraftingByMessage({})
     setApprovingByAction({})
   }, [sessionId])
+
+  const formatProgressMessage = (event: Record<string, unknown>): string => {
+    const phase = typeof event.phase === "string" ? event.phase : ""
+    if (phase === "plan_ready") {
+      const probeCount = typeof event.probe_count === "number" ? event.probe_count : "?"
+      const goal = typeof event.analysis_goal === "string" ? event.analysis_goal : "analysis"
+      return `Planned ${probeCount} probes for ${goal}`
+    }
+    if (phase === "probe_started") {
+      const probeId = typeof event.probe_id === "string" ? event.probe_id : "probe"
+      const question = typeof event.question === "string" ? event.question : "running probe"
+      return `Running ${probeId}: ${question}`
+    }
+    if (phase === "probe_completed") {
+      const probeId = typeof event.probe_id === "string" ? event.probe_id : "probe"
+      const rowCount = typeof event.row_count === "number" ? event.row_count : "?"
+      return `Completed ${probeId} (${rowCount} rows)`
+    }
+    if (phase === "synthesis_completed") {
+      const primaryProbe = typeof event.primary_probe_id === "string" ? event.primary_probe_id : "primary probe"
+      return `Synthesized final answer using ${primaryProbe}`
+    }
+    return "Analyzing data..."
+  }
 
   const submitQuestion = async (question: string) => {
     if (!question.trim() || loading || !sessionId) return
@@ -79,9 +105,10 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
     setInputValue("")
     setLoading(true)
     setError(null)
+    setStreamProgress([])
 
     try {
-      const response = await fetch("/api/analyze", {
+      const response = await fetch("/api/analyze/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -93,32 +120,106 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
         }),
       })
 
-      const payload = await response.json()
       if (!response.ok) {
+        const payload = await response.json()
         throw new Error(payload.detail || "Analysis failed")
       }
 
-      const assistantMessage: FullMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        message: payload.insight,
-        chartData: payload.data,
-        chartConfig: payload.chart_config,
-        chartOptions: Array.isArray(payload.chart_options) ? payload.chart_options : [],
-        trust: payload.trust,
-        sql: payload.sql,
-        analysisType: payload.analysis_type,
-        followUpQuestions: payload.follow_up_questions,
-        exploration: payload.exploration,
+      if (!response.body) {
+        throw new Error("Analysis stream did not return a response body")
       }
 
-      if (payload.conversation_id) {
-        setConversationId(payload.conversation_id)
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let receivedResult = false
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const chunks = buffer.split("\n\n")
+        buffer = chunks.pop() ?? ""
+
+        for (const chunk of chunks) {
+          const line = chunk
+            .split("\n")
+            .find((entry) => entry.startsWith("data: "))
+          if (!line) continue
+
+          const raw = line.slice(6).trim()
+          if (!raw) continue
+
+          let event: Record<string, unknown>
+          try {
+            event = JSON.parse(raw) as Record<string, unknown>
+          } catch {
+            continue
+          }
+
+          const eventType = typeof event.type === "string" ? event.type : ""
+          if (eventType === "progress") {
+            const progressLine = formatProgressMessage(event)
+            setStreamProgress((prev) => {
+              const next = [...prev, progressLine]
+              return next.slice(-8)
+            })
+            continue
+          }
+
+          if (eventType === "error") {
+            const detail = typeof event.detail === "string" && event.detail
+              ? event.detail
+              : "Analysis failed"
+            throw new Error(detail)
+          }
+
+          if (eventType === "result") {
+            const payload = event.payload as Record<string, unknown> | undefined
+            if (!payload) continue
+
+            const assistantMessage: FullMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              message: String(payload.insight ?? ""),
+              chartData: Array.isArray(payload.data)
+                ? (payload.data as Record<string, unknown>[])
+                : [],
+              chartConfig: (payload.chart_config ?? undefined) as FullMessage["chartConfig"],
+              chartOptions: Array.isArray(payload.chart_options)
+                ? (payload.chart_options as FullMessage["chartOptions"])
+                : [],
+              trust: (payload.trust ?? undefined) as FullMessage["trust"],
+              sql: typeof payload.sql === "string" ? payload.sql : undefined,
+              analysisType: typeof payload.analysis_type === "string" ? payload.analysis_type : undefined,
+              followUpQuestions: Array.isArray(payload.follow_up_questions)
+                ? (payload.follow_up_questions.filter((item): item is string => typeof item === "string").slice(0, 3))
+                : [],
+              exploration: (payload.exploration ?? undefined) as FullMessage["exploration"],
+            }
+
+            const incomingConversationId = typeof event.conversation_id === "string" ? event.conversation_id : null
+            if (incomingConversationId) {
+              setConversationId(incomingConversationId)
+            }
+
+            const nextFollowUps = Array.isArray(payload.follow_up_questions)
+              ? payload.follow_up_questions.filter((item): item is string => typeof item === "string").slice(0, 3)
+              : []
+            setFollowUps(nextFollowUps)
+            setMessages((prev) => [...prev, assistantMessage])
+            receivedResult = true
+          }
+        }
       }
-      setFollowUps(Array.isArray(payload.follow_up_questions) ? payload.follow_up_questions.slice(0, 3) : [])
-      setMessages((prev) => [...prev, assistantMessage])
+
+      if (!receivedResult) {
+        throw new Error("Analysis stream ended before returning a result")
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
+      setStreamProgress([])
     } finally {
       setLoading(false)
     }
@@ -282,6 +383,15 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
                   <div className="w-2 h-2 bg-neutral-400 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }} />
                   <div className="w-2 h-2 bg-neutral-400 rounded-full animate-pulse" style={{ animationDelay: "0.4s" }} />
                 </div>
+                {streamProgress.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {streamProgress.map((item, index) => (
+                      <div key={`${item}-${index}`} className="text-xs text-neutral-400">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

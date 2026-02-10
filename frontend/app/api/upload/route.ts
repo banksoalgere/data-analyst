@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { getErrorDetail, readProxyPayload } from "@/lib/proxy";
 
 export async function POST(request: Request) {
   try {
@@ -11,15 +12,15 @@ export async function POST(request: Request) {
     });
 
     if (!backendResponse.ok) {
-      const errorData = await backendResponse.json();
+      const payload = await readProxyPayload(backendResponse);
       return Response.json(
-        { detail: errorData.detail || "Upload failed" },
+        { detail: getErrorDetail(payload, "Upload failed") },
         { status: backendResponse.status }
       );
     }
 
-    const result = await backendResponse.json();
-    return Response.json(result);
+    const payload = await readProxyPayload(backendResponse);
+    return Response.json(payload);
 
   } catch (error) {
     console.error("Error in upload proxy:", error);

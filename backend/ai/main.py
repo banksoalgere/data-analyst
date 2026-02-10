@@ -12,12 +12,75 @@ api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     logging.warning("No api key set")
 
+
+MODEL_NAME = "gpt-5"
+
+
 class AIClient:
     def __init__(self):
         self.client = openai.OpenAI(api_key=api_key)
 
+    @staticmethod
+    def _coerce_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif hasattr(item, "text") and isinstance(item.text, str):
+                    parts.append(item.text)
+            return "\n".join(part for part in parts if part).strip()
+        if isinstance(content, dict):
+            text = content.get("text")
+            if isinstance(text, str):
+                return text
+            return json.dumps(content, default=str)
+        return str(content)
+
+    def _build_chat_messages(self, context: list[dict[str, Any]]) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        for item in context:
+            if not isinstance(item, dict):
+                continue
+
+            role = item.get("role")
+            if role not in {"system", "user", "assistant"}:
+                continue
+
+            content = self._coerce_content(item.get("content"))
+            if not content.strip():
+                continue
+            messages.append({"role": role, "content": content})
+        return messages
+
+    @staticmethod
+    def _extract_stream_delta(delta_content: Any) -> str:
+        if isinstance(delta_content, str):
+            return delta_content
+        if isinstance(delta_content, list):
+            parts: list[str] = []
+            for part in delta_content:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif hasattr(part, "text") and isinstance(part.text, str):
+                    parts.append(part.text)
+            return "".join(parts)
+        return ""
+
     def send_message(self, context: Optional[list] = None, message: str = "") -> Dict[str, Any]:
-        """A function to send messages using the OpenAI Responses API (non-streaming)"""
+        """Send a chat message using Chat Completions (non-streaming)."""
         try:
             logging.info("Sending message to OpenAI client")
             if context is None:
@@ -27,22 +90,13 @@ class AIClient:
             new_context = {"role": "user", "content": message}
             context.append(new_context)
 
-            # Make the API call using Responses API
-            response = self.client.responses.create(
-                model="gpt-4o-mini",
-                input=context,
+            # Make the API call using Chat Completions
+            response = self.client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=self._build_chat_messages(context),
             )
 
-            # Extract the assistant's reply from response.output
-            assistant_message = ""
-            if response.output and len(response.output) > 0:
-                # Get the first output message
-                output_message = response.output[0]
-                if hasattr(output_message, 'content') and len(output_message.content) > 0:
-                    # Get the text from the first content part
-                    content_part = output_message.content[0]
-                    if hasattr(content_part, 'text'):
-                        assistant_message = content_part.text
+            assistant_message = self._coerce_content(response.choices[0].message.content)
 
             # Add assistant's reply to context
             context.append({"role": "assistant", "content": assistant_message})
@@ -56,7 +110,7 @@ class AIClient:
             raise
 
     async def stream_message(self, context: Optional[list] = None, message: str = "") -> AsyncGenerator[str, None]:
-        """Stream messages using the OpenAI Responses API with streaming enabled"""
+        """Stream chat messages using Chat Completions."""
         try:
             logging.info("Streaming message to OpenAI client")
             if context is None:
@@ -67,20 +121,28 @@ class AIClient:
             context.append(new_context)
 
             # Make the streaming API call
-            stream = self.client.responses.create(
-                model="gpt-4o-mini",
-                input=context,
+            stream = self.client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=self._build_chat_messages(context),
                 stream=True,
             )
 
             full_response = ""
-            for event in stream:
-                # Handle ResponseTextDeltaEvent which has the actual text content
-                if hasattr(event, 'type') and event.type == 'response.output_text.delta':
-                    if hasattr(event, 'delta'):
-                        content = event.delta
-                        full_response += content
-                        yield json.dumps({"content": content, "done": False}) + "\n"
+            for chunk in stream:
+                choices = getattr(chunk, "choices", [])
+                if not choices:
+                    continue
+
+                delta = getattr(choices[0], "delta", None)
+                if not delta:
+                    continue
+
+                content = self._extract_stream_delta(getattr(delta, "content", None))
+                if not content:
+                    continue
+
+                full_response += content
+                yield json.dumps({"content": content, "done": False}) + "\n"
 
             # Send final message with full context update
             context.append({"role": "assistant", "content": full_response})

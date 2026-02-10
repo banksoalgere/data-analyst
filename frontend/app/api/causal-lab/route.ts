@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { getErrorDetail, readProxyPayload } from "@/lib/proxy";
 
 export async function POST(request: Request) {
   try {
@@ -12,10 +13,10 @@ export async function POST(request: Request) {
       body: JSON.stringify(body),
     });
 
-    const payload = await backendResponse.json();
+    const payload = await readProxyPayload(backendResponse);
     if (!backendResponse.ok) {
       return Response.json(
-        { detail: payload.detail || "Causal lab failed" },
+        { detail: getErrorDetail(payload, "Causal lab failed") },
         { status: backendResponse.status }
       );
     }
