@@ -109,6 +109,7 @@ export function DataChatInterface({ sessionId, profile }: DataChatInterfaceProps
         sql: payload.sql,
         analysisType: payload.analysis_type,
         followUpQuestions: payload.follow_up_questions,
+        exploration: payload.exploration,
       }
 
       if (payload.conversation_id) {

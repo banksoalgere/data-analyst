@@ -14,6 +14,8 @@ export function TrustPanel({ trust }: TrustPanelProps) {
   const confidence = Number(trust.confidence_score ?? 0)
   const provenance = (trust.provenance ?? {}) as Record<string, unknown>
   const limitations = Array.isArray(trust.limitations) ? trust.limitations : []
+  const probeCount = provenance.exploration_probe_count
+  const primaryProbe = provenance.exploration_primary_probe_id
 
   return (
     <div className="mb-3 rounded border border-neutral-800 bg-neutral-950 p-3 space-y-2">
@@ -27,6 +29,16 @@ export function TrustPanel({ trust }: TrustPanelProps) {
         <span className="text-xs text-neutral-400">
           rows visualized: {String(provenance.rows_visualized ?? "n/a")}
         </span>
+        {probeCount !== undefined && (
+          <span className="text-xs text-neutral-400">
+            probes run: {String(probeCount)}
+          </span>
+        )}
+        {primaryProbe !== undefined && (
+          <span className="text-xs text-neutral-400">
+            primary probe: {String(primaryProbe)}
+          </span>
+        )}
       </div>
       {limitations.length > 0 && (
         <div className="text-xs text-neutral-400">
@@ -36,4 +48,3 @@ export function TrustPanel({ trust }: TrustPanelProps) {
     </div>
   )
 }
-

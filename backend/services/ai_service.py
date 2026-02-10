@@ -12,9 +12,12 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
+CHART_TYPES = {"line", "bar", "scatter", "pie", "area"}
+ANALYSIS_TYPES = {"trend", "correlation", "comparison", "distribution", "overview", "other"}
+
 
 class AIAnalystService:
-    """Service for generating SQL queries and chart configs from natural language"""
+    """Service for generating SQL-driven analytics workflows from natural language."""
 
     def __init__(self):
         if not api_key:
@@ -22,11 +25,10 @@ class AIAnalystService:
         self.client = openai.OpenAI(api_key=api_key)
 
     def _format_schema_for_prompt(self, schema: List[Dict[str, Any]]) -> str:
-        """Convert schema to readable format for AI"""
         lines = []
         for col in schema:
-            col_name = col.get('column_name', 'unknown')
-            col_type = col.get('column_type', 'unknown')
+            col_name = col.get("column_name", "unknown")
+            col_type = col.get("column_type", "unknown")
             lines.append(f"  - {col_name} ({col_type})")
         return "\n".join(lines)
 
@@ -44,38 +46,47 @@ class AIAnalystService:
             formatted.append(f"- {role}: {content[:500]}")
         return "\n".join(formatted) if formatted else "No previous context."
 
-    def _normalize_response(
-        self,
-        result: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        sql = result.get("sql")
-        if not isinstance(sql, str) or not sql.strip():
-            raise ValueError("AI response missing valid 'sql' field")
-
-        chart_config = result.get("chart_config")
+    def _normalize_chart_config(self, chart_config: Any, field_name: str = "chart_config") -> Dict[str, Any]:
         if not isinstance(chart_config, dict):
-            raise ValueError("AI response missing valid 'chart_config' object")
+            raise ValueError(f"AI response missing valid '{field_name}' object")
 
         chart_type = chart_config.get("type")
-        if chart_type not in {"line", "bar", "scatter", "pie", "area"}:
-            raise ValueError("AI response has unsupported chart_config.type")
+        if chart_type not in CHART_TYPES:
+            raise ValueError(f"AI response has unsupported {field_name}.type")
 
         x_key = chart_config.get("xKey")
         y_key = chart_config.get("yKey")
         if not isinstance(x_key, str) or not x_key.strip():
-            raise ValueError("AI response missing valid chart_config.xKey")
+            raise ValueError(f"AI response missing valid {field_name}.xKey")
         if not isinstance(y_key, str) or not y_key.strip():
-            raise ValueError("AI response missing valid chart_config.yKey")
+            raise ValueError(f"AI response missing valid {field_name}.yKey")
 
-        follow_ups = result.get("follow_up_questions")
+        normalized = {
+            "type": chart_type,
+            "xKey": x_key.strip(),
+            "yKey": y_key.strip(),
+        }
+        group_by = chart_config.get("groupBy")
+        if isinstance(group_by, str) and group_by.strip():
+            normalized["groupBy"] = group_by.strip()
+        return normalized
+
+    def _normalize_follow_up_questions(self, follow_ups: Any, require_non_empty: bool = True) -> List[str]:
         if not isinstance(follow_ups, list):
             raise ValueError("AI response missing valid follow_up_questions list")
-        follow_ups = [q.strip() for q in follow_ups if isinstance(q, str) and q.strip()][:3]
-        if not follow_ups:
+
+        cleaned = [q.strip() for q in follow_ups if isinstance(q, str) and q.strip()][:3]
+        if require_non_empty and not cleaned:
             raise ValueError("AI response follow_up_questions is empty")
+        return cleaned
+
+    def _normalize_response(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        sql = result.get("sql")
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError("AI response missing valid 'sql' field")
 
         analysis_type = result.get("analysis_type")
-        if not isinstance(analysis_type, str) or not analysis_type.strip():
+        if not isinstance(analysis_type, str) or analysis_type.strip().lower() not in ANALYSIS_TYPES:
             raise ValueError("AI response missing valid analysis_type")
 
         insight = result.get("insight")
@@ -86,8 +97,104 @@ class AIAnalystService:
             "sql": sql.strip(),
             "insight": insight.strip(),
             "analysis_type": analysis_type.strip().lower(),
-            "chart_config": chart_config,
-            "follow_up_questions": follow_ups,
+            "chart_config": self._normalize_chart_config(result.get("chart_config")),
+            "follow_up_questions": self._normalize_follow_up_questions(result.get("follow_up_questions")),
+        }
+
+    def _normalize_exploration_plan(self, result: Dict[str, Any], max_probes: int) -> Dict[str, Any]:
+        analysis_goal = result.get("analysis_goal")
+        if not isinstance(analysis_goal, str) or not analysis_goal.strip():
+            raise ValueError("LLM exploration output missing analysis_goal.")
+
+        probes = result.get("probes")
+        if not isinstance(probes, list):
+            raise ValueError("LLM exploration output missing probes list.")
+        if len(probes) < 2 or len(probes) > max_probes:
+            raise ValueError(f"LLM exploration must return between 2 and {max_probes} probes.")
+
+        normalized: List[Dict[str, Any]] = []
+        probe_ids: set[str] = set()
+        sql_signatures: set[str] = set()
+
+        for index, probe in enumerate(probes):
+            if not isinstance(probe, dict):
+                raise ValueError(f"LLM exploration probe {index + 1} is invalid.")
+
+            probe_id = probe.get("probe_id")
+            probe_question = probe.get("question")
+            probe_sql = probe.get("sql")
+            analysis_type = probe.get("analysis_type")
+            rationale = probe.get("rationale")
+
+            if not isinstance(probe_id, str) or not probe_id.strip():
+                raise ValueError(f"LLM exploration probe {index + 1} missing probe_id.")
+            probe_id = probe_id.strip()
+            if probe_id in probe_ids:
+                raise ValueError("LLM exploration contains duplicate probe_id values.")
+
+            if not isinstance(probe_question, str) or not probe_question.strip():
+                raise ValueError(f"LLM exploration probe {probe_id} missing question.")
+            if not isinstance(probe_sql, str) or not probe_sql.strip():
+                raise ValueError(f"LLM exploration probe {probe_id} missing sql.")
+            if not isinstance(analysis_type, str) or analysis_type.strip().lower() not in ANALYSIS_TYPES:
+                raise ValueError(f"LLM exploration probe {probe_id} has invalid analysis_type.")
+            if not isinstance(rationale, str) or not rationale.strip():
+                raise ValueError(f"LLM exploration probe {probe_id} missing rationale.")
+
+            sql_signature = probe_sql.strip().lower()
+            if sql_signature in sql_signatures:
+                raise ValueError("LLM exploration contains duplicate SQL probes.")
+
+            normalized.append(
+                {
+                    "probe_id": probe_id,
+                    "question": probe_question.strip(),
+                    "analysis_type": analysis_type.strip().lower(),
+                    "sql": probe_sql.strip(),
+                    "chart_hint": self._normalize_chart_config(
+                        probe.get("chart_hint"),
+                        field_name=f"probes[{probe_id}].chart_hint",
+                    ),
+                    "rationale": rationale.strip(),
+                }
+            )
+            probe_ids.add(probe_id)
+            sql_signatures.add(sql_signature)
+
+        return {
+            "analysis_goal": analysis_goal.strip(),
+            "probes": normalized,
+        }
+
+    def _normalize_exploration_synthesis(
+        self,
+        result: Dict[str, Any],
+        valid_probe_ids: set[str],
+    ) -> Dict[str, Any]:
+        analysis_type = result.get("analysis_type")
+        if not isinstance(analysis_type, str) or analysis_type.strip().lower() not in ANALYSIS_TYPES:
+            raise ValueError("LLM synthesis output missing valid analysis_type.")
+
+        primary_probe_id = result.get("primary_probe_id")
+        if not isinstance(primary_probe_id, str) or primary_probe_id.strip() not in valid_probe_ids:
+            raise ValueError("LLM synthesis output has invalid primary_probe_id.")
+
+        insight = result.get("insight")
+        if not isinstance(insight, str) or not insight.strip():
+            raise ValueError("LLM synthesis output missing insight.")
+
+        limitations_raw = result.get("limitations", [])
+        if not isinstance(limitations_raw, list):
+            raise ValueError("LLM synthesis output has invalid limitations list.")
+        limitations = [item.strip() for item in limitations_raw if isinstance(item, str) and item.strip()][:5]
+
+        return {
+            "analysis_type": analysis_type.strip().lower(),
+            "primary_probe_id": primary_probe_id.strip(),
+            "insight": insight.strip(),
+            "chart_config": self._normalize_chart_config(result.get("chart_config")),
+            "follow_up_questions": self._normalize_follow_up_questions(result.get("follow_up_questions")),
+            "limitations": limitations,
         }
 
     def _call_json_model(
@@ -125,17 +232,6 @@ class AIAnalystService:
         profile: Dict[str, Any] | None = None,
         conversation_history: List[Dict[str, str]] | None = None,
     ) -> Dict[str, Any]:
-        """
-        Generate SQL query and chart configuration from natural language
-
-        Args:
-            question: User's natural language question
-            schema: Database schema
-            table_name: Name of the table to query
-
-        Returns:
-            Dict with sql, insight, and chart_config
-        """
         schema_str = self._format_schema_for_prompt(schema)
         history_str = self._format_history_for_prompt(conversation_history or [])
         profile_json = json.dumps(profile or {}, indent=2, default=str)
@@ -199,45 +295,166 @@ Return JSON in this exact format:
 
         try:
             logger.info(f"Generating SQL for question: {question[:100]}...")
-
             result = self._call_json_model(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.3,
             )
-
             normalized = self._normalize_response(result)
             logger.info(f"Generated SQL: {normalized['sql'][:100]}...")
             return normalized
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse AI response as JSON: {e}")
-            raise ValueError("LLM returned invalid JSON for analysis output.")
         except Exception as e:
             logger.error(f"Error generating SQL: {e}")
             raise ValueError(f"LLM analysis failed: {str(e)}")
+
+    def plan_exploration(
+        self,
+        question: str,
+        schema: List[Dict[str, Any]],
+        table_name: str = "uploaded_data",
+        profile: Dict[str, Any] | None = None,
+        conversation_history: List[Dict[str, str]] | None = None,
+        max_probes: int = 3,
+    ) -> Dict[str, Any]:
+        if max_probes < 2:
+            raise ValueError("max_probes must be at least 2.")
+
+        schema_str = self._format_schema_for_prompt(schema)
+        history_str = self._format_history_for_prompt(conversation_history or [])
+        profile_json = json.dumps(profile or {}, indent=2, default=str)
+
+        system_prompt = f"""You are a principal analytics investigator.
+Your job is to design a short multi-step exploration plan to answer a user question.
+
+Table name: {table_name}
+Schema:
+{schema_str}
+
+Dataset profile:
+{profile_json}
+
+Conversation context:
+{history_str}
+
+You must return between 2 and {max_probes} probes.
+Each probe must include:
+- probe_id
+- question
+- analysis_type
+- sql
+- chart_hint
+- rationale
+
+Rules:
+- SQL must be single SELECT/CTE and DuckDB compatible
+- Use different probes to triangulate the answer (trend, segmentation, correlation, outliers as appropriate)
+- SQL statements must not be duplicates
+- chart_hint columns must match projected SQL columns
+- Return valid JSON only
+"""
+
+        user_prompt = f"""User question: {question}
+
+Return JSON in this exact shape:
+{{
+  "analysis_goal": "short objective",
+  "probes": [
+    {{
+      "probe_id": "probe_1",
+      "question": "what this probe checks",
+      "analysis_type": "trend|correlation|comparison|distribution|overview|other",
+      "sql": "SELECT ... FROM {table_name} ...",
+      "chart_hint": {{
+        "type": "line|bar|scatter|pie|area",
+        "xKey": "column_from_select",
+        "yKey": "column_from_select",
+        "groupBy": "optional"
+      }},
+      "rationale": "why this probe helps"
+    }}
+  ]
+}}"""
+
+        result = self._call_json_model(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.3,
+        )
+        return self._normalize_exploration_plan(result, max_probes=max_probes)
+
+    def synthesize_exploration(
+        self,
+        question: str,
+        exploration_goal: str,
+        executed_probes: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not executed_probes:
+            raise ValueError("No executed probes were provided for synthesis.")
+
+        valid_probe_ids = {
+            str(item.get("probe_id", "")).strip() for item in executed_probes if str(item.get("probe_id", "")).strip()
+        }
+        if not valid_probe_ids:
+            raise ValueError("Executed probes missing probe_id values.")
+
+        probes_json = json.dumps(executed_probes, indent=2, default=str)
+
+        system_prompt = """You are a principal data analyst.
+Synthesize multiple probe results into one clear answer.
+
+Rules:
+- Choose exactly one primary_probe_id from the provided probe_ids
+- Insight must reference concrete evidence from probe results
+- Keep insight concise but specific
+- Include up to 3 precise follow-up questions
+- Add limitations when evidence is weak or incomplete
+- Return valid JSON only
+"""
+
+        user_prompt = f"""User question: {question}
+Exploration goal: {exploration_goal}
+Executed probe summaries:
+{probes_json}
+
+Return JSON in this exact shape:
+{{
+  "analysis_type": "trend|correlation|comparison|distribution|overview|other",
+  "primary_probe_id": "one_of_{sorted(valid_probe_ids)}",
+  "insight": "final answer grounded in the probes",
+  "chart_config": {{
+    "type": "line|bar|scatter|pie|area",
+    "xKey": "column_from_primary_probe",
+    "yKey": "column_from_primary_probe",
+    "groupBy": "optional"
+  }},
+  "follow_up_questions": [
+    "question 1",
+    "question 2",
+    "question 3"
+  ],
+  "limitations": [
+    "optional limitation 1",
+    "optional limitation 2"
+  ]
+}}"""
+
+        result = self._call_json_model(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.2,
+        )
+        return self._normalize_exploration_synthesis(result, valid_probe_ids=valid_probe_ids)
 
     def generate_insight_from_data(
         self,
         question: str,
         data: List[Dict[str, Any]],
-        sql_query: str
+        sql_query: str,
     ) -> str:
-        """
-        Generate a natural language insight from query results
-
-        Args:
-            question: Original user question
-            data: Query result data (first few rows)
-            sql_query: The SQL query that was executed
-
-        Returns:
-            Natural language insight
-        """
         if not data:
             return "No rows were returned for this query."
-        sample_data = data[:10]
 
+        sample_data = data[:10]
         prompt = f"""Based on this SQL query and results, provide a brief insight.
 
 User Question: {question}
@@ -253,14 +470,13 @@ Provide a 1-2 sentence insight highlighting key findings or trends."""
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a data analyst. Provide concise insights."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.5,
-                max_tokens=150
+                max_tokens=150,
             )
 
             return response.choices[0].message.content.strip()
-
         except Exception as e:
             logger.error(f"Error generating insight: {e}")
             raise ValueError(f"LLM insight generation failed: {str(e)}")

@@ -3,6 +3,7 @@
 import { FullMessage } from "@/types/chat"
 import { DynamicChart } from "@/components/DynamicChart"
 import { ActionDraftsPanel } from "./ActionDraftsPanel"
+import { ExplorationPanel } from "./ExplorationPanel"
 import { TrustPanel } from "./TrustPanel"
 
 interface AssistantMessageContentProps {
@@ -37,6 +38,10 @@ export function AssistantMessageContent({
 
       {message.trust && typeof message.trust === "object" && (
         <TrustPanel trust={message.trust as Record<string, unknown>} />
+      )}
+
+      {message.exploration && (
+        <ExplorationPanel exploration={message.exploration} />
       )}
 
       {showSql && message.sql && (

@@ -37,6 +37,25 @@ export const ActionDraftSchema = z
   })
   .passthrough()
 
+export const ExplorationProbeSchema = z
+  .object({
+    probe_id: z.string(),
+    question: z.string(),
+    analysis_type: z.string(),
+    rationale: z.string().optional(),
+    sql: z.string(),
+    row_count: z.number(),
+  })
+  .passthrough()
+
+export const ExplorationSummarySchema = z
+  .object({
+    analysis_goal: z.string(),
+    primary_probe_id: z.string(),
+    probes: z.array(ExplorationProbeSchema),
+  })
+  .passthrough()
+
 export const FullMessageSchema = z.object({
   id: z.string().uuid(),
   role: RoleSchema,
@@ -50,6 +69,7 @@ export const FullMessageSchema = z.object({
   analysisType: z.string().optional(),
   followUpQuestions: z.array(z.string()).optional(),
   actionDrafts: z.array(ActionDraftSchema).optional(),
+  exploration: ExplorationSummarySchema.optional(),
 })
 
 export type MessageInput = z.infer<typeof MessageSchema>
@@ -58,6 +78,8 @@ export type Role = z.infer<typeof RoleSchema>
 export type ChartConfig = z.infer<typeof ChartConfigSchema>
 export type TrustLayer = z.infer<typeof TrustLayerSchema>
 export type ActionDraft = z.infer<typeof ActionDraftSchema>
+export type ExplorationProbe = z.infer<typeof ExplorationProbeSchema>
+export type ExplorationSummary = z.infer<typeof ExplorationSummarySchema>
 export type FullMessage = z.infer<typeof FullMessageSchema>
 
 export interface APISuccessResponse<T> {
